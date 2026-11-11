@@ -1,0 +1,1153 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SENTINEL Console</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600;700&family=Barlow+Semi+Condensed:wght@500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap">
+<style>
+/* Layout: an operator console on a fixed 1920 x 1080 page that is scaled to the window.
+   Left rail and top bar: navigation. Sensor tiles: camera, RF receiver, microphone. Right: the detection panel and the event list. Bottom: the decision timeline.
+   The page replays saved model outputs. The presenter starts the replay and switches sensors off and on while the recording plays. */
+:root {
+  --bg: #0b0e13; --panel: #12161d; --head: #161b23; --line: #232a35; --ink: #e8edf4; --soft: #9aa4b2; --dim: #66707f;
+  --blue: #3d8bfd; --pale: #cfdcff; --raised: #1c232d; --rule: #232a35; --alert: #ff6b1a; --ok: #2fbf71; --bad: #f0524a; --warn: #e3b341;
+  --ui: "IBM Plex Sans", "Segoe UI", Arial, sans-serif;
+  --display: "Archivo", "Arial Black", Arial, sans-serif;
+  --body: "Lato", "Segoe UI", Arial, sans-serif;
+  --mono: "IBM Plex Mono", "Courier New", monospace;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; overflow: hidden; background: #05070a; color: var(--ink); }
+#stage { position: fixed; left: 50%; top: 50%; width: 1920px; height: 1080px; transform-origin: 0 0; overflow: hidden; isolation: isolate; background: var(--bg); font: 400 21px/1.3 var(--ui); color: var(--ink); }
+#console { position: absolute; inset: 0; }
+h1, h2, h3, p { margin: 0; }
+button { font: inherit; color: inherit; }
+[hidden] { display: none !important; }
+button:focus-visible { outline: 3px solid var(--blue); outline-offset: 2px; }
+.cap { font: 600 19px var(--ui); letter-spacing: .09em; text-transform: uppercase; color: var(--soft); }
+.meta { font: 400 19px var(--mono); color: var(--dim); white-space: nowrap; }
+.cap { white-space: nowrap; }
+kbd { font: 500 19px var(--mono); border: 1px solid #323b48; border-bottom-width: 3px; border-radius: 5px; padding: 0 8px; color: var(--soft); background: var(--bg); }
+
+/* Navigation rail */
+#rail { position: absolute; left: 0; top: 0; bottom: 0; width: 64px; background: #0e1218; border-right: 1px solid var(--line); display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 10px 0; }
+#rail .logo { width: 40px; height: 40px; border-radius: 10px; background: var(--blue); display: grid; place-items: center; margin-bottom: 14px; }
+#rail .logo i { width: 18px; height: 18px; border: 3px solid #fff; border-radius: 50%; position: relative; }
+#rail .logo i::after { content: ""; position: absolute; left: 50%; top: 50%; width: 4px; height: 4px; margin: -2px; border-radius: 50%; background: #fff; }
+#rail button { width: 46px; height: 46px; border: 0; border-radius: 9px; background: none; display: grid; place-items: center; color: var(--dim); cursor: pointer; position: relative; }
+#rail button.on { background: var(--raised); color: var(--ink); }
+#rail button.on::before { content: ""; position: absolute; left: -9px; top: 9px; bottom: 9px; width: 3px; border-radius: 2px; background: var(--blue); }
+#rail svg { width: 24px; height: 24px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+#rail .sp { flex: 1; }
+
+/* Top bar */
+#top { position: absolute; left: 64px; right: 0; top: 0; height: 60px; background: var(--panel); border-bottom: 1px solid var(--line); display: flex; align-items: center; gap: 18px; padding: 0 20px 0 16px; }
+#top .name { font: 700 22px var(--ui); letter-spacing: .16em; }
+#top .crumb { color: var(--soft); } #top .crumb b { font-weight: 500; color: var(--ink); }
+#top .sep { width: 1px; height: 28px; background: var(--line); }
+#tabs { display: flex; background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 3px; gap: 2px; }
+#tabs button { background: none; border: 0; border-radius: 6px; min-width: 40px; padding: 4px 10px; font: 500 20px var(--mono); color: var(--soft); cursor: pointer; }
+#tabs button.on { background: var(--raised); color: var(--ink); box-shadow: inset 0 0 0 1px #323b48; }
+#play { display: flex; align-items: center; gap: 10px; background: var(--blue); border: 0; border-radius: 8px; padding: 8px 20px 8px 16px; font: 600 20px var(--ui); color: #fff; cursor: pointer; }
+#play::before { content: ""; border-left: 13px solid #fff; border-top: 8px solid transparent; border-bottom: 8px solid transparent; }
+#play:disabled { background: var(--raised); color: var(--dim); cursor: default; } #play:disabled::before { border-left-color: var(--dim); }
+#top .right { margin-left: auto; display: flex; align-items: center; gap: 18px; }
+#mode { display: flex; align-items: center; gap: 8px; border-radius: 6px; padding: 4px 12px; background: rgba(227,179,65,.12); color: var(--warn); font: 600 19px var(--mono); letter-spacing: .08em; }
+#mode::before { content: ""; width: 9px; height: 9px; border-radius: 50%; background: var(--warn); }
+#tc { font: 500 22px var(--mono); min-width: 248px; text-align: right; }
+#top .user { width: 36px; height: 36px; border-radius: 50%; background: var(--raised); border: 1px solid #323b48; display: grid; place-items: center; font: 600 19px var(--ui); color: var(--soft); }
+
+/* Panels */
+.panel { position: absolute; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; display: flex; flex-direction: column; }
+.phead { flex: none; height: 46px; border-bottom: 1px solid var(--line); display: flex; align-items: center; gap: 12px; padding: 0 16px; }
+.phead .r { margin-left: auto; display: flex; align-items: center; gap: 14px; }
+
+/* Sensor tiles. The border colour shows the state of the tile: normal, alarm, or signal lost. */
+.feed { cursor: pointer; padding: 0; text-align: left; transition: border-color .15s, box-shadow .15s; }
+#f-cam { left: 80px; top: 76px; width: 624px; height: 640px; }
+#f-rf { left: 716px; top: 76px; width: 468px; height: 314px; }
+#f-aud { left: 716px; top: 402px; width: 468px; height: 314px; }
+.feed .view { position: relative; flex: 1; background: #05070a; overflow: hidden; }
+.feed video, .feed img, .feed canvas.media { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; display: block; }
+#f-cam .view video, #f-cam .view img { object-fit: contain; }
+.pill { display: flex; align-items: center; gap: 8px; border-radius: 20px; padding: 2px 12px 2px 10px; font: 600 19px var(--mono); letter-spacing: .04em; background: rgba(47,191,113,.12); color: var(--ok); }
+.pill::before { content: ""; width: 9px; height: 9px; border-radius: 50%; background: currentColor; }
+.osd { position: absolute; z-index: 2; font: 500 19px var(--mono); color: #fff; background: rgba(5,7,10,.62); border-radius: 5px; padding: 2px 9px; }
+.osd.tl { left: 10px; top: 10px; } .osd.bl { left: 10px; bottom: 10px; } .osd.tr { right: 10px; top: 10px; background: var(--alert); font-weight: 600; letter-spacing: .08em; opacity: 0; transition: opacity .15s; }
+.feed .noise { position: absolute; inset: 0; opacity: 0; background-size: 256px 256px; image-rendering: pixelated; }
+.feed .lost { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); z-index: 2; display: flex; flex-direction: column; align-items: center; gap: 4px; font: 600 23px var(--mono); letter-spacing: .12em; color: #fff; background: rgba(5,7,10,.86); border: 1px solid var(--bad); border-radius: 8px; padding: 10px 20px; opacity: 0; white-space: nowrap; }
+.feed .lost small { font: 400 19px var(--ui); letter-spacing: 0; color: var(--soft); }
+.feed.off { border-color: rgba(240,82,74,.6); }
+.feed.off .noise { opacity: .8; animation: noise .45s steps(6) infinite; }
+.feed.off .lost { opacity: 1; }
+.feed.off .pill { background: rgba(240,82,74,.14); color: var(--bad); }
+.feed.none { cursor: default; } .feed.none .pill { background: var(--raised); color: var(--dim); }
+.feed.none .view > img, .feed.none .view > canvas { visibility: hidden; }
+.feed.none .view::after { content: "Not installed at this site"; position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); font: 400 20px var(--mono); color: var(--dim); white-space: nowrap; }
+#console.alarm #f-cam:not(.off) { border-color: var(--alert); box-shadow: 0 0 0 2px rgba(255,107,26,.35); }
+#console.alarm #f-cam:not(.off) .osd.tr { opacity: 1; }
+@keyframes noise { to { background-position: 256px 128px; } }
+.feed.cut .view { animation: cut .3s steps(4); }
+@keyframes cut { 0% { transform: translateX(-10px); filter: brightness(2.2); } 50% { transform: translateX(7px); } 100% { transform: none; filter: none; } }
+.feed.shake { animation: shake .3s; }
+@keyframes shake { 25% { transform: translateX(-6px); } 75% { transform: translateX(6px); } }
+
+/* Detection panel */
+#detect { left: 1196px; top: 76px; width: 704px; height: 330px; }
+#dbody { flex: 1; display: grid; grid-template-columns: 1fr 250px; }
+#dleft { padding: 20px 0 18px 22px; display: flex; flex-direction: column; }
+#badge { align-self: flex-start; display: flex; align-items: center; gap: 10px; border-radius: 8px; padding: 6px 16px 6px 12px; font: 700 30px var(--ui); letter-spacing: .03em; background: var(--raised); color: var(--soft); transition: background .15s, color .15s; white-space: nowrap; }
+#badge::before { content: ""; width: 14px; height: 14px; border-radius: 50%; background: currentColor; }
+#detect.drone #badge { background: var(--alert); color: #fff; }
+#detect.clear #badge { background: rgba(47,191,113,.14); color: var(--ok); }
+#result { color: var(--soft); margin-top: 12px; min-height: 56px; padding-right: 10px; }
+#inputs { margin-top: auto; }
+#chips { display: flex; gap: 8px; margin-top: 8px; }
+#chips span { display: flex; align-items: center; gap: 8px; border: 1px solid var(--line); border-radius: 7px; padding: 4px 12px; font: 500 19px var(--mono); color: var(--ink); }
+#chips span::before { content: ""; width: 9px; height: 9px; border-radius: 50%; background: var(--ok); }
+#chips span.off { color: var(--bad); text-decoration: line-through; border-color: rgba(240,82,74,.5); } #chips span.off::before { background: var(--bad); }
+#chips span.na { color: var(--dim); } #chips span.na::before { background: var(--dim); }
+#dright { border-left: 1px solid var(--line); display: flex; flex-direction: column; align-items: center; padding: 14px 0 0; }
+#gauge { width: 210px; height: 122px; }
+#gauge path { fill: none; stroke-width: 16; stroke-linecap: round; }
+#g-bg { stroke: var(--raised); } #g-fg { stroke: var(--ok); transition: stroke-dashoffset .18s, stroke .15s; }
+#g-fg.hi { stroke: var(--alert); }
+#gnum { font: 600 54px/1 var(--mono); margin-top: -62px; }
+#glabel { margin-top: 8px; }
+#runway { margin-top: auto; align-self: stretch; border-top: 1px solid var(--line); padding: 10px 16px 12px; display: flex; align-items: center; justify-content: space-between; }
+#advice { font: 600 21px var(--mono); border-radius: 6px; padding: 2px 12px; background: var(--raised); color: var(--soft); }
+#advice.open { background: rgba(47,191,113,.14); color: var(--ok); } #advice.closed { background: var(--alert); color: #fff; }
+
+/* Event list */
+#logp { left: 1196px; top: 418px; width: 704px; height: 298px; }
+#log { flex: 1; overflow: hidden; font: 400 20px/1.2 var(--ui); }
+#log div { display: grid; grid-template-columns: 4px 104px 96px 1fr; align-items: center; gap: 0 12px; height: 36px; padding-right: 14px; border-bottom: 1px solid rgba(35,42,53,.7); white-space: nowrap; }
+#log i { align-self: stretch; background: var(--dim); }
+#log span { font-family: var(--mono); color: var(--dim); } #log b { font: 500 19px var(--mono); color: var(--soft); } #log em { font-style: normal; overflow: hidden; text-overflow: ellipsis; }
+#log .al i { background: var(--alert); } #log .al em { color: var(--alert); font-weight: 600; }
+#log .bad i { background: var(--bad); } #log .bad em { color: var(--bad); }
+#log .good i { background: var(--ok); } #log .good em { color: var(--ok); }
+#log div:first-child { background: rgba(61,139,253,.07); }
+
+/* Decision timeline */
+#hist { left: 80px; top: 728px; width: 1820px; height: 304px; }
+#hbody { position: relative; flex: 1; }
+#bars { position: absolute; left: 96px; right: 70px; top: 16px; height: 120px; border-bottom: 1px solid #323b48; }
+#bars .th { position: absolute; left: 0; right: -58px; top: 50%; border-top: 1px dashed var(--dim); }
+#bars .th span { position: absolute; right: 0; top: -13px; font: 400 19px var(--mono); color: var(--soft); background: var(--panel); padding-left: 6px; }
+#bars i { position: absolute; bottom: 0; height: 0; border-radius: 3px 3px 0 0; background: #46505f; transition: height .18s ease-out, background .15s; }
+#bars i.yes { background: var(--alert); }
+#bars u { position: absolute; height: 3px; background: #fff; opacity: 0; transition: opacity .2s, bottom .18s; }
+#bars em { position: absolute; top: 130px; font: 500 20px var(--ui); font-style: normal; text-align: center; }
+#bars strong { position: absolute; font: 500 23px var(--mono); text-align: center; }
+#head { position: absolute; left: 96px; top: 8px; height: 222px; width: 2px; background: var(--ink); opacity: 0; }
+#head::before { content: ""; position: absolute; left: -5px; top: -2px; border-top: 8px solid var(--ink); border-left: 6px solid transparent; border-right: 6px solid transparent; }
+#rows { position: absolute; left: 0; right: 70px; top: 148px; display: grid; grid-template-rows: repeat(3, 15px); gap: 6px; }
+#rows div { position: relative; margin-left: 96px; }
+#rows span { position: absolute; left: -80px; top: -6px; font: 500 19px var(--mono); color: var(--soft); }
+#rows i { position: absolute; top: 0; height: 15px; border-radius: 2px; background: var(--raised); }
+#rows i.on { background: #2b62c4; }
+#rows i.offl { background: repeating-linear-gradient(135deg, var(--bad) 0 3px, transparent 3px 7px); outline: 1px solid rgba(240,82,74,.45); outline-offset: -1px; }
+#axis { position: absolute; left: 96px; right: 70px; top: 216px; height: 26px; font: 400 19px var(--mono); color: var(--dim); }
+#axis span { position: absolute; transform: translateX(-50%); white-space: nowrap; }
+.key { display: flex; align-items: center; gap: 8px; font: 400 19px var(--ui); color: var(--soft); }
+.key i { width: 14px; height: 14px; border-radius: 2px; background: var(--alert); } .key i.g { background: #46505f; } .key i.t { height: 3px; width: 18px; background: #fff; }
+
+#foot { position: absolute; left: 64px; right: 0; bottom: 0; height: 36px; background: #0e1218; border-top: 1px solid var(--line); display: flex; align-items: center; justify-content: space-between; padding: 0 20px 0 16px; font: 400 19px var(--ui); color: var(--soft); }
+#foot kbd { margin: 0 6px 0 16px; }
+
+/* The inside of the model for one decision: the page zooms in, then tokens, queries, the connector and Qwen follow in order. */
+#s-model { position: absolute; inset: 0; z-index: 10; display: none; background: radial-gradient(42% 52% at 92% 100%, rgba(47,107,255,.32) 0, transparent 75%), radial-gradient(30% 36% at 4% 0, rgba(47,107,255,.18) 0, transparent 75%), var(--bg); }
+#s-model.show { display: block; }
+.title { position: absolute; left: 128px; right: 330px; top: 26px; font: 700 34px/1.2 var(--body); color: var(--ink); }
+#mhint { left: 128px; bottom: 26px; font: 500 22px var(--mono); color: var(--soft); }
+#s-model > *, #mlanes > * { position: absolute; }
+#mlanes { left: 0; top: 0; }
+.thumb { width: 130px; height: 130px; border-radius: 16px; overflow: hidden; border: 2px solid var(--blue); background: #070b16; opacity: 0; transform: scale(.7); transition: opacity .4s, transform .5s cubic-bezier(.2,1.4,.4,1), filter .4s; }
+.thumb.on { opacity: 1; transform: none; }
+.thumb img, .thumb canvas { width: 100%; height: 100%; object-fit: cover; display: block; }
+.thumb.off { border-color: var(--dim); }
+.thumb.off img, .thumb.off canvas { filter: grayscale(1) brightness(.45); }
+.thumb.off::after { content: ""; position: absolute; inset: 0; background: repeating-linear-gradient(135deg, transparent 0 12px, rgba(255,255,255,.16) 12px 17px); }
+.lname { font: 700 22px var(--display); font-stretch: 112%; text-transform: uppercase; color: var(--soft); width: 130px; text-align: center; }
+.wire { height: 3px; width: 46px; background: var(--blue); transform-origin: 0 50%; transform: scaleX(0); transition: transform .4s .2s; }
+.wire.on { transform: none; }
+.wire.off { background: none; border-top: 3px dashed var(--dim); }
+.toks { display: grid; }
+.toks.cam { grid-template-columns: repeat(4, 72px); gap: 18px; }
+.grp { display: grid; grid-template-columns: repeat(4, 15px); gap: 4px; }
+.toks.big { grid-auto-flow: column; grid-auto-columns: 44px; gap: 14px; }
+.tk { display: block; background: var(--ink); border-radius: 3px; opacity: 0; transform: scale(.3); transition: opacity .3s, transform .4s cubic-bezier(.2,1.6,.4,1); }
+.grp .tk { width: 15px; height: 15px; }
+.toks.big .tk { width: 44px; height: 44px; border-radius: 8px; }
+.tk.rf { background: var(--pale); }
+.tk.au { background: var(--blue); }
+.tk.on { opacity: 1; transform: none; }
+.tk.mask { background: none; border: 2px dashed var(--dim); }
+.toks.big .tk.mask { border-width: 3px; }
+.count { font: 500 22px var(--mono); color: var(--pale); opacity: 0; transition: opacity .4s; white-space: nowrap; }
+.count.on { opacity: 1; }
+.count.off { color: var(--dim); }
+.mini { position: absolute; z-index: 4; border-radius: 8px; overflow: hidden; pointer-events: none; box-shadow: 0 0 16px rgba(47,107,255,.5); }
+.mini img, .mini canvas { width: 100%; height: 100%; object-fit: cover; display: block; }
+.mlabel { font: 700 23px var(--body); color: var(--pale); white-space: nowrap; opacity: 0; transition: opacity .5s; }
+.mlabel.on { opacity: 1; }
+#queries { left: 830px; top: 176px; width: 30px; height: 690px; z-index: 3; }
+#queries i { position: absolute; left: 0; width: 30px; height: 30px; border-radius: 50%; border: 3px solid var(--soft); background: var(--bg); opacity: 0; transform: scale(.2); transition: opacity .3s, transform .4s cubic-bezier(.2,1.6,.4,1), background .3s, border-color .3s, box-shadow .3s; }
+#queries i.on { opacity: 1; transform: none; }
+#queries i.lit { background: var(--blue); border-color: var(--blue); box-shadow: 0 0 16px 3px rgba(47,107,255,.6); }
+.block { top: 160px; width: 70px; height: 722px; border-radius: 16px; border: 2px solid var(--rule); background: rgba(20,27,48,.75); opacity: 0; transition: opacity .5s; z-index: 2; }
+.block.on { opacity: 1; }
+#funnel { left: 1265px; top: 168px; width: 155px; height: 706px; clip-path: polygon(0 0, 100% 43%, 100% 57%, 0 100%); background: linear-gradient(90deg, rgba(47,107,255,.12), rgba(47,107,255,.6)); opacity: 0; transition: opacity .5s; }
+#funnel.on { opacity: 1; }
+#qwen { left: 1440px; top: 290px; width: 352px; height: 470px; padding: 24px; background: var(--panel); border: 2px solid var(--rule); border-radius: 22px; opacity: 0; transform: translateY(14px); transition: opacity .6s, transform .6s, border-color .4s, box-shadow .4s; }
+#qwen.on { opacity: 1; transform: none; }
+#qwen.live { border-color: var(--blue); box-shadow: 0 0 38px rgba(47,107,255,.28); }
+.qhead { display: flex; align-items: center; gap: 14px; }
+.qhead h3 { font: 800 34px var(--display); font-stretch: 112%; text-transform: uppercase; }
+.qhead span { font: 500 21px var(--mono); color: #bfe3ff; border: 2px solid #bfe3ff; border-radius: 8px; padding: 0 9px; }
+#slots { display: grid; grid-template-columns: repeat(8, 22px); gap: 12px; margin-top: 20px; height: 56px; }
+#slots i { width: 22px; height: 22px; border-radius: 50%; border: 2px dashed var(--rule); }
+#ask { margin-top: 18px; min-height: 72px; font-size: 27px; line-height: 1.3; }
+.yesrow { display: flex; align-items: baseline; gap: 14px; margin-top: 18px; opacity: 0; transition: opacity .4s; }
+.yesrow span { font: 500 27px var(--mono); color: var(--soft); }
+.yesrow b { font: 600 56px/1.1 var(--mono); color: var(--alert); }
+.meter { position: relative; height: 24px; margin-top: 8px; border-radius: 6px; background: var(--raised); opacity: 0; transition: opacity .4s; }
+.meter i { position: absolute; left: 0; top: 0; bottom: 0; width: 100%; border-radius: 6px; background: var(--alert); transform-origin: 0 50%; transform: scaleX(0); }
+.meter u { position: absolute; left: 50%; top: -6px; bottom: -6px; width: 3px; margin-left: -1px; background: #fff; }
+.half { margin-top: 6px; text-align: center; font: 500 21px var(--mono); color: var(--soft); opacity: 0; transition: opacity .4s; }
+.qfoot { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; margin-top: 10px; opacity: 0; transition: opacity .4s; }
+.qfoot small { font-size: 21px; color: var(--soft); }
+#qwen.answer .yesrow, #qwen.answer .meter, #qwen.answer .half, #qwen.answer .qfoot { opacity: 1; }
+.tag { font: 700 24px var(--display); font-stretch: 112%; text-transform: uppercase; border-radius: 9px; padding: 5px 14px; background: var(--ink); color: var(--panel); white-space: nowrap; }
+.tag.yes { background: var(--alert); color: #fff; }
+.tag:empty { display: none; }
+.faded { opacity: .62 !important; }
+#s-model .thumb, #s-model .toks, #s-model .lname, #s-model .wire, #s-model .block { transition-property: opacity, transform, filter; }
+.fly { position: absolute; z-index: 5; width: 13px; height: 13px; border-radius: 50%; background: var(--blue); box-shadow: 0 0 12px 3px rgba(47,107,255,.7); pointer-events: none; }
+
+#s-model { background: var(--bg); }
+#qwen.live { box-shadow: none; }
+/* Look: square corners, pure black, white text, solid state colours. No tints, no shadows, no rounded shapes. */
+:root { --bg: #000; --panel: #000; --head: #000; --line: #4d5560; --rule: #4d5560; --raised: #1f242b; --ink: #fff; --soft: #d0d7de; --dim: #8b949e;
+  --blue: #2f81f7; --alert: #ff6a00; --ok: #00e676; --bad: #ff3b30; --warn: #ffd60a; }
+#stage *, #stage *::before, #stage *::after { border-radius: 0 !important; box-shadow: none !important; }
+html, body { background: #000; }
+#rail, #foot, #top { background: #000; }
+#rail button.on { background: #fff; color: #000; } #rail button.on::before { display: none; }
+#tabs { padding: 0; gap: 0; background: #000; } #tabs button { border-right: 1px solid var(--line); } #tabs button:last-child { border-right: 0; }
+#tabs button.on { background: #fff; color: #000; font-weight: 600; }
+#play:disabled { background: #000; outline: 1px solid var(--line); outline-offset: -1px; }
+#mode { background: var(--warn); color: #000; } #mode::before { background: #000; }
+#top .user { background: #000; border-color: var(--line); color: #fff; }
+kbd { background: #000; border: 1px solid #fff; border-bottom-width: 1px; color: #fff; }
+.panel { border-color: var(--line); }
+.phead { border-bottom-color: var(--line); }
+.cap { color: #fff; }
+.pill { background: var(--ok); color: #000; padding: 1px 10px; } .pill::before { display: none; }
+.feed.off .pill { background: var(--bad); color: #fff; }
+.feed.none .pill { background: #000; color: var(--dim); outline: 1px solid var(--line); outline-offset: -1px; }
+.feed.off { border-color: var(--bad); }
+.feed .lost { background: #000; border: 2px solid var(--bad); }
+.osd { background: #000; }
+#console.alarm #f-cam:not(.off) { border-color: var(--alert); outline: 2px solid var(--alert); outline-offset: -3px; }
+#badge { background: #000; color: #fff; outline: 2px solid #fff; outline-offset: -2px; } #badge::before { width: 14px; height: 14px; }
+#detect.drone #badge { background: var(--alert); color: #000; outline: 0; }
+#detect.clear #badge { background: var(--ok); color: #000; outline: 0; }
+#result { color: #fff; }
+#chips span { border-color: #fff; } #chips span.off { border-color: var(--bad); } #chips span.na { border-color: var(--line); }
+#gauge path { stroke-linecap: butt; } #g-bg { stroke: #2b3138; }
+#advice { background: #000; color: #fff; outline: 1px solid var(--line); outline-offset: -1px; }
+#advice.open { background: var(--ok); color: #000; outline: 0; } #advice.closed { background: var(--alert); color: #000; outline: 0; }
+#log div { border-bottom-color: #2b3138; } #log div:first-child { background: #000; }
+#log span { color: var(--soft); } #log b { color: #fff; }
+#bars { border-bottom-color: #fff; } #bars i { background: #6e7781; } #bars .th { border-top-color: #fff; } #bars .th span { color: #fff; }
+#rows i { background: #1f242b; } #rows i.on { background: var(--blue); }
+#rows i.offl { background: repeating-linear-gradient(135deg, var(--bad) 0 3px, #000 3px 7px); outline-color: var(--bad); }
+#axis { color: var(--soft); } .key { color: #fff; } .key i.g { background: #6e7781; }
+#foot { color: #fff; }
+#s-model { background: #000; }
+#qwen, .block { background: #000; border-color: #fff; } #qwen.live { border-color: var(--blue); }
+#funnel { background: var(--blue); opacity: 0; } #funnel.on { opacity: .55; }
+.thumb { border-radius: 0; } .tk.mask { border-color: #8b949e; }
+/* Type and density: Barlow for text, JetBrains Mono for values. Smaller type and thinner bars, so more of the console is in view. */
+:root { --ui: "Barlow", "Segoe UI", Arial, sans-serif; --display: "Barlow Semi Condensed", "Arial Narrow", Arial, sans-serif; --body: "Barlow", "Segoe UI", Arial, sans-serif; --mono: "JetBrains Mono", "Courier New", monospace; }
+#stage { font-size: 17px; }
+.cap { font: 600 14px var(--display); letter-spacing: .12em; } .meta { font-size: 14px; }
+kbd { font-size: 13px; padding: 0 6px; }
+#rail { width: 52px; } #rail .logo { width: 32px; height: 32px; } #rail .logo i { width: 14px; height: 14px; border-width: 2px; } #rail button { width: 38px; height: 38px; } #rail svg { width: 20px; height: 20px; }
+#top { left: 52px; height: 48px; gap: 16px; padding: 0 14px; }
+#top .name { font: 700 17px var(--display); letter-spacing: .22em; } #top .sep { height: 22px; }
+#tabs button { font-size: 14px; min-width: 32px; padding: 4px 8px; }
+#play { font-size: 15px; padding: 6px 16px 6px 12px; gap: 8px; } #play::before { border-left-width: 10px; border-top-width: 6px; border-bottom-width: 6px; }
+#mode { font-size: 13px; padding: 3px 9px; } #mode::before { width: 7px; height: 7px; }
+#tc { font-size: 16px; min-width: 190px; } #top .user { width: 28px; height: 28px; font-size: 13px; }
+.phead { height: 36px; padding: 0 12px; gap: 10px; } .phead .r { gap: 10px; }
+.pill { font-size: 13px; padding: 1px 8px; }
+#f-cam { left: 64px; top: 60px; width: 600px; height: 620px; }
+#f-rf { left: 676px; top: 60px; width: 520px; height: 304px; }
+#f-aud { left: 676px; top: 376px; width: 520px; height: 304px; }
+.osd { font-size: 14px; padding: 1px 7px; } .osd.tl { left: 8px; top: 8px; } .osd.bl { left: 8px; bottom: 8px; } .osd.tr { right: 8px; top: 8px; }
+.feed .lost { font-size: 16px; padding: 8px 16px; } .feed .lost small { font-size: 14px; } .feed.none .view::after { font-size: 14px; }
+#detect { left: 1208px; top: 60px; width: 700px; height: 304px; }
+#dbody { grid-template-columns: 1fr 240px; } #dleft { padding: 16px 0 14px 16px; }
+#badge { font: 700 22px var(--display); letter-spacing: .08em; padding: 5px 14px 5px 10px; gap: 8px; } #badge::before { width: 10px; height: 10px; }
+#result { font-size: 16px; margin-top: 10px; min-height: 44px; }
+#chips { gap: 6px; margin-top: 6px; } #chips span { font-size: 13px; padding: 3px 9px; gap: 6px; } #chips span::before { width: 7px; height: 7px; }
+#dright { padding-top: 16px; } #gauge { width: 180px; height: 105px; } #gauge path { stroke-width: 12; } #gnum { font-size: 40px; margin-top: -46px; } #glabel { margin-top: 6px; }
+#runway { padding: 8px 12px; } #advice { font-size: 14px; padding: 2px 10px; }
+#logp { left: 1208px; top: 376px; width: 700px; height: 304px; }
+#log { font-size: 15px; } #log div { height: 30px; grid-template-columns: 3px 84px 76px 1fr; gap: 0 10px; } #log span, #log b { font-size: 13px; }
+#hist { left: 64px; top: 692px; width: 1844px; height: 346px; }
+#bars { left: 84px; right: 64px; top: 18px; height: 150px; } #bars .th { right: -54px; } #bars .th span { font-size: 13px; top: -9px; }
+#bars em { top: 160px; font-size: 15px; } #bars strong { font-size: 16px; }
+#head { left: 84px; height: 266px; }
+#rows { top: 184px; right: 64px; grid-template-rows: repeat(3, 12px); gap: 5px; } #rows div { margin-left: 84px; } #rows span { left: -68px; top: -4px; font-size: 13px; } #rows i { height: 12px; }
+#axis { left: 84px; right: 64px; top: 246px; font-size: 13px; }
+.key { font-size: 14px; } .key i { width: 11px; height: 11px; }
+#foot { left: 52px; height: 30px; font-size: 14px; padding: 0 14px; } #foot kbd { margin: 0 5px 0 14px; }
+.title { font: 600 26px var(--display); letter-spacing: .02em; } .lname, .qhead h3 { font-family: var(--display); letter-spacing: .08em; }
+/* The site name has a fixed width, and the Start button has a fixed width, so the controls in the top bar stay in place when the recording changes. */
+#top > .crumb { width: 260px; flex: none; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#play { width: 132px; flex: none; justify-content: center; white-space: nowrap; }
+#tc { flex: none; }
+#top .name { font: 700 30px/1 var(--display); letter-spacing: .2em; flex: none; }
+
+/* Colours: warm dark grey with the blue of the slide deck. The script sets the grey values. Contrast is moderate. Orange is for a drone detection, and red is for a lost sensor. No yellow. */
+:root { --bg: #0b1020; --panel: #111830; --head: #111830; --line: #2a3350; --rule: #2a3350; --raised: #1b2440; --ink: #e3e8f4; --soft: #aab4c8; --dim: #7d879c;
+  --blue: #2f6bff; --pale: #cfdcff; --alert: #ff6a1a; --ok: #8fb0ff; --bad: #e5605a; --chrome: #0d1326; --well: #070b16; --bar: #4a5878; }
+html, body { background: var(--well); }
+#rail, #foot, #top { background: var(--chrome); }
+.panel { background: var(--panel); }
+.feed .view { background: var(--well); }
+.cap { color: var(--soft); } #result, #foot, .key, #log b { color: var(--soft); } #log span { color: var(--dim); }
+#rail button.on { background: var(--blue); color: #fff; }
+#tabs { background: transparent; } #tabs button.on { background: var(--blue); color: #fff; }
+#play:disabled { background: transparent; }
+#mode { background: transparent; color: var(--ok); outline: 1px solid var(--blue); outline-offset: -1px; } #mode::before { background: var(--blue); }
+#top .user { background: transparent; color: var(--soft); }
+kbd { background: transparent; border-color: var(--dim); color: var(--soft); }
+.pill { background: transparent; color: var(--ok); outline: 1px solid var(--blue); outline-offset: -1px; }
+.feed.off .pill { background: var(--bad); color: #fff; outline: 0; }
+.feed.none .pill { background: transparent; }
+.feed .lost { background: var(--well); border-width: 1px; } .osd { background: rgba(11,10,10,.85); color: #fff; }
+#badge { background: transparent; color: var(--ink); outline: 1px solid var(--dim); outline-offset: -1px; }
+#detect.drone #badge { background: var(--alert); color: #fff; }
+#detect.clear #badge { background: var(--blue); color: #fff; }
+#chips span { border-color: var(--line); } #chips span::before { background: var(--blue); }
+#g-bg { stroke: var(--raised); } #g-fg { stroke: var(--blue); } #g-fg.hi { stroke: var(--alert); }
+#gauge line { stroke: var(--soft); }
+#advice { background: transparent; color: var(--soft); } #advice.open { background: var(--blue); color: #fff; } #advice.closed { background: var(--alert); color: #fff; }
+#log div { border-bottom-color: var(--line); } #log div:first-child { background: transparent; }
+#log .good i { background: var(--blue); } #log .good em { color: var(--ok); }
+#bars { border-bottom-color: var(--dim); } #bars i { background: var(--bar); } #bars .th { border-top-color: var(--dim); } #bars .th span { color: var(--soft); }
+.key i.g { background: var(--bar); } #bars u, .key i.t { background: var(--pale); }
+#rows i { background: var(--raised); } #rows i.offl { background: repeating-linear-gradient(135deg, var(--bad) 0 3px, var(--panel) 3px 7px); }
+#head { background: var(--pale); } #head::before { border-top-color: var(--pale); }
+#s-model { background: var(--bg); } #qwen, .block { background: var(--panel); border-color: var(--line); }
+/* Motion for controls and state changes: each control answers a pointer and a press, and each state change moves in and out. */
+#tabs button, #play, #rail button, kbd, .pill, #chips span, #advice, #badge, #mode { transition: background-color .18s ease, color .18s ease, border-color .18s ease, outline-color .18s ease, transform .12s ease, opacity .18s ease; }
+#tabs button:hover:not(.on), #rail button:hover:not(.on) { background: var(--raised); color: var(--ink); }
+#play:hover:not(:disabled) { background: #4f83ff; }
+#tabs button:active, #play:active:not(:disabled), #rail button:active { transform: scale(.92); }
+.feed { transition: border-color .25s ease, outline-color .25s ease; }
+.feed:hover:not(.none) { border-color: var(--dim); } .feed.off:hover { border-color: var(--bad); }
+.feed:active:not(.none) .view { transform: scale(.985); } .feed .view { transition: transform .12s ease; }
+.feed .noise { transition: opacity .28s ease; }
+.feed .lost { transition: opacity .25s ease, transform .3s cubic-bezier(.2,.9,.3,1); transform: translate(-50%, -50%) scale(.85); }
+.feed.off .lost { transform: translate(-50%, -50%) scale(1); }
+.osd.tr { transition: opacity .2s ease, transform .25s cubic-bezier(.2,.9,.3,1); transform: translateX(12px); } #console.alarm #f-cam:not(.off) .osd.tr { transform: none; }
+#log div { animation: rowin .32s cubic-bezier(.2,.8,.2,1) both; }
+@keyframes rowin { from { opacity: 0; transform: translateX(-14px); background: var(--raised); } }
+#result { transition: opacity .25s ease; }
+#head { transition: opacity .3s ease; } #bars u { transition: opacity .25s ease, bottom .18s ease; }
+#rows i { transition: background-color .2s ease; }
+#g-fg { transition: stroke-dashoffset .22s ease, stroke .2s ease; }
+/* Pages: map, recordings and playback. One page shows at a time. The rail, the top bar and the footer stay. */
+.page { position: absolute; inset: 0; display: none; pointer-events: none; } .page.show { display: block; } .page > * { pointer-events: auto; }
+#console:not([data-view="play"]) #play, #console:not([data-view="play"]) #tc { visibility: hidden; }
+#console:not([data-view="play"]) #railmodel { opacity: .35; cursor: default; }
+#top > .crumb { width: 430px; }
+#rail svg.logo { width: 34px; height: 34px; margin-bottom: 12px; stroke: none; fill: initial; flex: none; } #rail svg.logo g { stroke-linecap: butt; stroke-linejoin: miter; }
+#nav-theme .moon { display: none; } :root[data-theme="light"] #nav-theme .sun { display: none; } :root[data-theme="light"] #nav-theme .moon { display: block; }
+#model-title { display: none; }
+.tk.rf { background: #8fb0ff; }
+.tk.mask, .tk.rf.mask, .tk.au.mask { background: none; }
+
+/* Map page */
+#mapp { left: 64px; top: 60px; width: 1844px; height: 978px; display: block; background: var(--well); }
+#mapimg { position: absolute; left: 0; top: -87px; width: 1844px; height: 1152px; filter: invert(1) hue-rotate(180deg) saturate(.45) brightness(.82) contrast(.95); }
+:root[data-theme="light"] #mapimg { filter: saturate(.8); }
+#mapov { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+#mapov circle { fill: rgba(47,107,255,.08); stroke: #2f6bff; stroke-width: 2; } #mapov .c1 { stroke-dasharray: 10 8; fill: rgba(47,107,255,.05); animation: ring 5s linear infinite; }
+#mapov .fov { fill: rgba(47,107,255,.22); stroke: #2f6bff; stroke-width: 2; }
+@keyframes ring { to { stroke-dashoffset: -180; } }
+#sitepin { position: absolute; left: 1595px; top: 393px; transform: translate(-13px, -13px); display: flex; align-items: center; gap: 10px; background: none; border: 0; padding: 0; cursor: pointer; }
+#sitepin i { width: 26px; height: 26px; background: #2f6bff; border: 4px solid #fff; outline: 2px solid #2f6bff; animation: pin 1.8s ease-in-out infinite; }
+#sitepin b { font: 600 15px var(--mono); background: var(--panel); color: var(--ink); border: 1px solid var(--line); padding: 3px 9px; }
+@keyframes pin { 50% { outline-offset: 7px; outline-color: rgba(47,107,255,0); } }
+#sitepin:hover b { border-color: var(--blue); }
+#sitecard { position: absolute; left: 20px; top: 20px; width: 360px; background: var(--panel); border: 1px solid var(--line); padding: 18px 18px 16px; display: flex; flex-direction: column; gap: 8px; }
+#sitecard h3 { font: 700 34px/1 var(--display); letter-spacing: .06em; margin-top: 4px; } #sitecard p { color: var(--soft); margin-bottom: 8px; }
+.srow { display: flex; justify-content: space-between; align-items: center; border-top: 1px solid var(--line); padding-top: 8px; font: 500 15px var(--mono); } .srow b { font-weight: 600; }
+#openrecs { margin-top: 10px; height: 44px; border: 0; background: var(--blue); color: #fff; font: 600 16px var(--ui); cursor: pointer; transition: background-color .18s ease, transform .12s ease; }
+#openrecs:hover { background: #4f83ff; } #openrecs:active { transform: scale(.97); }
+.maptag { position: absolute; bottom: 12px; font: 400 13px var(--mono); background: var(--panel); color: var(--soft); border: 1px solid var(--line); padding: 2px 8px; } #mapcoord { left: 20px; } #mapattr { right: 12px; }
+
+/* Recordings page */
+#recp { left: 64px; top: 60px; width: 1844px; height: 978px; }
+#rechead, .rec { display: grid; grid-template-columns: 176px 150px 1fr 300px 170px 150px 150px; align-items: center; gap: 0 20px; padding: 0 20px; }
+#rechead { height: 40px; border-bottom: 1px solid var(--line); font: 600 14px var(--display); letter-spacing: .12em; text-transform: uppercase; color: var(--dim); }
+.rec { width: 100%; height: 122px; background: none; border: 0; border-bottom: 1px solid var(--line); text-align: left; cursor: pointer; font-size: 18px; transition: background-color .18s ease; }
+.rec:hover, .rec.sel { background: var(--raised); } .rec.sel { box-shadow: inset 4px 0 0 var(--blue) !important; }
+.rec img { width: 176px; height: 98px; object-fit: cover; display: block; background: var(--well); }
+.rec b { font: 600 18px var(--mono); } .rec .mono { font: 400 16px var(--mono); color: var(--soft); }
+.rec .s { display: flex; gap: 6px; } .rec .s i { font: 500 13px var(--mono); font-style: normal; border: 1px solid var(--line); padding: 3px 9px; } .rec .s i.na { color: var(--dim); text-decoration: line-through; }
+.rec .open { justify-self: end; background: var(--blue); color: #fff; font: 600 15px var(--ui); padding: 8px 22px; opacity: 0; transition: opacity .18s ease; } .rec:hover .open, .rec.sel .open { opacity: 1 !important; }
+
+/* The map can be moved by a drag. The picture, the range rings and the site marker move together. */
+#mapp { overflow: hidden; cursor: grab; touch-action: none; user-select: none; } #mapp.drag { cursor: grabbing; }
+#mapworld { position: absolute; left: 0; top: 0; width: 2048px; height: 1280px; will-change: transform; }
+#mapimg { left: 0; top: 0; width: 2048px; height: 1280px; -webkit-user-drag: none; }
+#mapov { inset: auto; left: 0; top: 0; width: 2048px; height: 1280px; }
+#sitepin { left: 1772px; top: 533px; }
+#sitecard { cursor: default; }
+
+/* Strong motion: a start sequence, a radar sweep on the map, a map flight to the site, live previews in the list, a picture that flies into the camera tile, an alarm frame, a glitch when a sensor fails, and a circle that changes the mode. */
+#boot { position: absolute; inset: 0; z-index: 30; pointer-events: none; }
+#boot .bh { position: absolute; left: 0; right: 0; height: 50.2%; background: var(--chrome); } #boot .bh.t { top: 0; border-bottom: 2px solid var(--blue); } #boot .bh.b { bottom: 0; border-top: 2px solid var(--blue); }
+#boot .bc { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); display: flex; flex-direction: column; align-items: center; gap: 14px; }
+#boot svg { width: 120px; height: 120px; } #boot svg path { stroke-dasharray: 1; stroke-dashoffset: 1; animation: draw .5s ease-out forwards; } #boot svg path:nth-child(2) { animation-delay: .14s; } #boot svg path:nth-child(3) { animation-delay: .28s; }
+#boot svg rect { opacity: 0; animation: blinkin .2s .55s steps(2) forwards; }
+#boot b { opacity: 0; animation: namein .45s .2s cubic-bezier(.2,.8,.2,1) forwards; } @keyframes namein { from { opacity: 0; letter-spacing: .9em; } to { opacity: 1; } }
+@keyframes draw { to { stroke-dashoffset: 0; } } @keyframes blinkin { to { opacity: 1; } }
+#boot b { font: 700 54px/1 var(--display); letter-spacing: .34em; margin-right: -.34em; color: var(--ink); }
+#bootlines { font: 500 16px/1.7 var(--mono); color: var(--soft); min-height: 110px; text-align: left; white-space: pre; }
+#boot u { width: 420px; height: 4px; background: var(--raised); } #boot u i { display: block; height: 100%; width: 0; background: var(--blue); }
+#flash { position: absolute; inset: 0; z-index: 8; pointer-events: none; border: 0 solid var(--alert); opacity: 0; }
+.scanl { position: absolute; left: 0; right: 0; top: 0; height: 3px; background: #8fb0ff; opacity: 0; z-index: 1; pointer-events: none; }
+#bars i { transition: height .32s cubic-bezier(.2,1.7,.35,1), background .15s; transform-origin: 50% 100%; }
+.feed.glitch .view { animation: glitch .5s steps(1) both; }
+@keyframes glitch {
+  0% { clip-path: inset(0 0 0 0); transform: translateX(0); filter: none; }
+  10% { clip-path: inset(12% 0 58% 0); transform: translateX(-22px); filter: hue-rotate(90deg) saturate(3); }
+  20% { clip-path: inset(62% 0 8% 0); transform: translateX(18px); filter: invert(1); }
+  30% { clip-path: inset(30% 0 36% 0); transform: translateX(-10px) skewX(8deg); filter: hue-rotate(200deg) contrast(2); }
+  45% { clip-path: inset(0 0 72% 0); transform: translateX(26px); filter: saturate(4); }
+  60% { clip-path: inset(48% 0 20% 0); transform: translateX(-16px); filter: invert(1) hue-rotate(120deg); }
+  75% { clip-path: inset(6% 0 6% 0); transform: translateX(6px); filter: contrast(1.6); }
+  100% { clip-path: inset(0 0 0 0); transform: none; filter: none; }
+}
+.feed.reboot .view > video, .feed.reboot .view > img, .feed.reboot .view > canvas { animation: reboot .55s cubic-bezier(.2,.8,.2,1) both; }
+@keyframes reboot { 0% { clip-path: inset(50% 0 50% 0); filter: brightness(3) saturate(0); } 45% { clip-path: inset(49% 0 49% 0); filter: brightness(3) saturate(0); } 100% { clip-path: inset(0 0 0 0); filter: none; } }
+#mapov .sweep { transform-box: view-box; transform-origin: 1772px 533px; animation: sweep 3.6s linear infinite; } @keyframes sweep { to { transform: rotate(360deg); } }
+#mapov .ping { fill: none; stroke: #2f6bff; stroke-width: 3; transform-box: fill-box; transform-origin: center; animation: ping 3.6s cubic-bezier(.2,.6,.3,1) infinite; } #mapov .ping.p2 { animation-delay: 1.8s; }
+@keyframes ping { from { transform: scale(.04); opacity: .9; } to { transform: scale(1); opacity: 0; } }
+.rec .rthumb { position: relative; display: block; width: 176px; height: 98px; overflow: hidden; background: var(--well); }
+.rec .rthumb img { transition: transform .5s cubic-bezier(.2,.8,.2,1); } .rec:hover .rthumb img, .rec.sel .rthumb img { transform: scale(1.1); }
+.rec .rthumb video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.rec .rthumb::after { content: ""; position: absolute; left: 0; bottom: 0; height: 3px; width: 0; background: var(--blue); } .rec.sel .rthumb::after, .rec:hover .rthumb::after { animation: prog 10s linear infinite; } @keyframes prog { to { width: 100%; } }
+.rec b { transition: transform .25s cubic-bezier(.2,.8,.2,1); } .rec:hover b, .rec.sel b { transform: translateX(8px); }
+.flyimg { position: absolute; z-index: 9; object-fit: cover; pointer-events: none; outline: 2px solid var(--blue); }
+.edge { position: absolute; top: 48px; bottom: 30px; width: 10px; background: var(--blue); z-index: 7; pointer-events: none; }
+::view-transition-old(root), ::view-transition-new(root) { animation: none; mix-blend-mode: normal; }
+
+/* The map is larger than its panel, and it can be moved and zoomed. The site marker keeps its size at each zoom level. */
+#mapworld, #mapimg, #mapov { width: 3072px; height: 2048px; } #mapworld { transform-origin: 0 0; }
+#mapov .sweep { transform-origin: 1622px 1108px; }
+#sitepin { left: 1622px; top: 1108px; scale: var(--iz, 1); transform-origin: 0 0; }
+#zoomer { position: absolute; right: 12px; bottom: 48px; display: flex; flex-direction: column; border: 1px solid var(--line); background: var(--panel); cursor: default; }
+#zoomer button { width: 44px; height: 44px; border: 0; border-bottom: 1px solid var(--line); background: none; color: var(--ink); font: 500 26px/1 var(--mono); cursor: pointer; display: grid; place-items: center; transition: background-color .18s ease, transform .12s ease; }
+#zoomer button:last-child { border-bottom: 0; } #zoomer button:hover { background: var(--raised); } #zoomer button:active { transform: scale(.9); }
+#zoomer svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 1.8; }
+#homename { background: none; border: 0; padding: 0; cursor: pointer; color: var(--ink); transition: color .18s ease; } #homename:hover { color: var(--blue); }
+#homelogo { cursor: pointer; transition: transform .2s cubic-bezier(.2,.8,.2,1); } #homelogo:hover { transform: scale(1.12); } #homelogo:active { transform: scale(.92); }
+.rec .open { opacity: 0; }
+/* Model view: each sensor arrives as a large picture, then it goes to its place and turns into tokens. */
+.hero { position: absolute; left: 750px; top: 300px; width: 420px; height: 420px; z-index: 6; overflow: hidden; background: #0b0a0a; border: 3px solid var(--blue); transform-origin: 0 0; pointer-events: none; }
+.hero img, .hero canvas { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.hero b { position: absolute; left: 0; right: 0; bottom: 0; display: flex; justify-content: space-between; align-items: baseline; padding: 10px 16px; background: var(--blue); color: #fff; font: 700 30px var(--display); letter-spacing: .1em; text-transform: uppercase; }
+.hero b small { font: 500 17px var(--mono); letter-spacing: 0; text-transform: none; }
+.hero.off { border-color: var(--bad); } .hero.off img, .hero.off canvas { filter: grayscale(1) brightness(.4); } .hero.off b { background: var(--bad); }
+.hero.off::after { content: ""; position: absolute; inset: 0; background: repeating-linear-gradient(135deg, transparent 0 22px, rgba(229,96,90,.35) 22px 30px); }
+.streak { position: absolute; z-index: 5; height: 4px; background: var(--blue); pointer-events: none; transform-origin: 0 50%; }
+
+/* Model view: stage line at the top, facts at the bottom, labels in the fusion blocks, and one type scale for the Qwen panel. */
+#s-model::before { content: ""; position: absolute; inset: 0; pointer-events: none; opacity: .5; background: linear-gradient(var(--line) 1px, transparent 1px) 0 0 / 64px 64px, linear-gradient(90deg, var(--line) 1px, transparent 1px) 0 0 / 64px 64px; animation: grid 14s linear infinite; }
+@keyframes grid { to { background-position: 64px 64px, 64px 64px; } }
+#mstages { left: 128px; top: 44px; display: flex; gap: 0; }
+#mstages span { display: flex; align-items: center; gap: 10px; padding: 8px 22px 8px 10px; border: 1px solid var(--line); border-right: 0; font: 600 17px var(--display); letter-spacing: .12em; text-transform: uppercase; color: var(--dim); background: var(--bg); transition: background-color .3s ease, color .3s ease, border-color .3s ease; }
+#mstages span:last-child { border-right: 1px solid var(--line); }
+#mstages b { width: 26px; height: 26px; display: grid; place-items: center; background: var(--raised); font: 600 15px var(--mono); transition: background-color .3s ease, color .3s ease; }
+#mstages span.on { background: var(--blue); color: #fff; border-color: var(--blue); } #mstages span.on b { background: #fff; color: var(--blue); }
+#mstages span.done { color: var(--ink); } #mstages span.done b { background: var(--blue); color: #fff; }
+#minfo { right: 128px; top: 52px; font: 500 16px var(--mono); color: var(--soft); text-align: right; }
+#mstats { left: 128px; right: 128px; bottom: 64px; display: grid; grid-template-columns: 260px repeat(3, 210px) 1fr; border-top: 1px solid var(--line); background: var(--bg); }
+#mstats div { padding: 12px 0 0; display: flex; flex-direction: column; gap: 4px; } #mstats b { font: 600 30px var(--mono); } #mstats b i { font-style: normal; color: var(--blue); } #mstats b.sm { font: 600 20px var(--ui); padding-top: 8px; }
+#mhint { bottom: 22px; font-size: 14px; }
+.enc { font: 400 15px var(--mono); color: var(--dim); white-space: nowrap; opacity: 0; transition: opacity .4s; } .enc.on { opacity: 1; }
+.count { font-size: 17px; } .mlabel { font: 600 17px var(--display); letter-spacing: .1em; text-transform: uppercase; color: var(--soft); } .lname { font-size: 17px; }
+.block { display: flex; flex-direction: column; } .block span { flex: 1; display: grid; place-items: center; writing-mode: vertical-rl; transform: rotate(180deg); font: 600 14px var(--display); letter-spacing: .14em; text-transform: uppercase; color: var(--dim); border-top: 1px solid var(--line); transition: background-color .25s ease, color .25s ease; }
+.block span:last-child { border-top: 0; } .block span:first-child { border-top: 1px solid var(--line); } .block span.lit { background: var(--blue); color: #fff; }
+.toks.read .tk.on:not(.mask) { animation: read .5s ease-in-out infinite alternate; } .toks.read .grp:nth-child(2n) .tk, .toks.read .tk:nth-child(2n) { animation-delay: .25s; }
+@keyframes read { to { opacity: .45; } }
+#qwen { left: 1440px; top: 250px; width: 352px; height: 520px; padding: 22px; display: flex; flex-direction: column; }
+#qwen .cap { font-size: 13px; color: var(--dim); margin-top: 14px; }
+.qhead { justify-content: space-between; } .qhead h3 { font: 700 28px/1 var(--display); letter-spacing: .06em; text-transform: none; }
+.qhead span { font: 500 14px var(--mono); padding: 1px 8px; color: var(--ok); border: 1px solid var(--blue); }
+#slots { margin-top: 8px; height: auto; grid-template-columns: repeat(8, 22px); gap: 10px 12px; }
+#ask { margin-top: 6px; min-height: 58px; font: 500 20px/1.4 var(--ui); color: var(--ink); }
+.ycap, #qwen .yesrow, #qwen .meter, #qwen .half, #qwen .qfoot { opacity: 0; transition: opacity .4s; } #qwen.answer .ycap { opacity: 1; }
+.yesrow { margin-top: 2px; align-items: center; justify-content: space-between; } .yesrow b { font: 600 60px/1.05 var(--mono); }
+.tag { font: 700 17px var(--display); letter-spacing: .1em; padding: 5px 12px; }
+.meter { height: 12px; margin-top: 10px; } .meter u { top: -5px; bottom: -5px; }
+.half { margin-top: 8px; font: 400 14px var(--mono); color: var(--dim); text-align: center; }
+.qfoot { margin-top: auto; } .qfoot small { font: 400 14px var(--mono); color: var(--soft); }
+
+/* Start screen: the name has a soft blue glow, and it breaks into shifted colour slices in short bursts, like a sensor that fails. */
+#boot b { position: relative; animation: namein .45s .2s cubic-bezier(.2,.8,.2,1) forwards, nameglow 1.6s .7s ease-in-out infinite alternate, nameshift 2.4s .9s steps(1) infinite; }
+@keyframes nameglow { from { text-shadow: 0 0 0 rgba(47,107,255,0); } to { text-shadow: 0 0 26px rgba(47,107,255,.95), 0 0 70px rgba(47,107,255,.55); } }
+@keyframes nameshift { 0%, 100% { transform: none; } 3% { transform: translateX(-9px) skewX(-10deg); } 6% { transform: translateX(7px); } 9% { transform: none; } 52% { transform: translateX(5px) skewX(6deg); } 55% { transform: translateX(-4px); } 57% { transform: none; } }
+#boot b::before, #boot b::after { content: attr(data-t); position: absolute; left: 0; top: 0; width: 100%; opacity: 0; pointer-events: none; }
+#boot b::before { color: #2f6bff; animation: slice1 2.4s .9s steps(1) infinite; } #boot b::after { color: #ff6a1a; animation: slice2 2.4s .9s steps(1) infinite; }
+@keyframes slice1 { 0%, 10%, 100% { opacity: 0; } 2% { opacity: 1; transform: translateX(-16px); clip-path: inset(8% 0 62% 0); } 5% { opacity: 1; transform: translateX(12px); clip-path: inset(58% 0 12% 0); } 8% { opacity: 1; transform: translateX(-6px); clip-path: inset(34% 0 40% 0); } 51% { opacity: 1; transform: translateX(10px); clip-path: inset(70% 0 4% 0); } 54% { opacity: 1; transform: translateX(-12px); clip-path: inset(18% 0 56% 0); } 57% { opacity: 0; } }
+@keyframes slice2 { 0%, 10%, 100% { opacity: 0; } 2% { opacity: 1; transform: translateX(14px); clip-path: inset(52% 0 20% 0); } 5% { opacity: 1; transform: translateX(-10px); clip-path: inset(4% 0 70% 0); } 8% { opacity: 1; transform: translateX(8px); clip-path: inset(76% 0 2% 0); } 51% { opacity: 1; transform: translateX(-9px); clip-path: inset(30% 0 46% 0); } 54% { opacity: 1; transform: translateX(13px); clip-path: inset(60% 0 14% 0); } 57% { opacity: 0; } }
+
+/* Qwen panel: the decision tag has its own line, at a fixed size that fits the panel. */
+#qwen .qfoot { flex-direction: row; align-items: center; justify-content: space-between; gap: 12px; margin-top: auto; }
+#qwen .tag { display: inline-block; font: 700 18px/1 var(--display); letter-spacing: .1em; text-transform: uppercase; padding: 8px 14px; white-space: nowrap; max-width: 100%; background: var(--blue); color: #fff; transform-origin: 0 50%; }
+#qwen:not(.isdrone) .yesrow b { color: var(--blue); } #qwen:not(.isdrone) .meter i { background: var(--blue); }
+#qwen .tag.yes { background: var(--alert); } #qwen .tag:empty { display: none; }
+
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { transition-duration: 0s !important; animation: none !important; } }
+</style>
+</head>
+<body>
+<div id="stage">
+ <div id="console">
+  <div id="rail">
+    <svg class="logo" id="homelogo" viewBox="0 0 32 32" role="button" tabindex="0" aria-label="SENTINEL, go to the map"><rect width="32" height="32" fill="#2f6bff"/><g fill="none" stroke="#fff" stroke-width="2.6"><path d="M12 21.5l4-4 4 4"/><path d="M8 19.5l8-8 8 8"/><path d="M4 17.5l12-12 12 12"/></g><rect x="14" y="23.5" width="4" height="4" fill="#fff"/></svg>
+    <button type="button" id="nav-map" aria-label="Map"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="8" height="8"/><rect x="13" y="3" width="8" height="8"/><rect x="3" y="13" width="8" height="8"/><rect x="13" y="13" width="8" height="8"/></svg></button>
+    <button type="button" id="nav-recs" aria-label="Recordings"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg></button>
+    <button type="button" id="railmodel" aria-label="Model view"><svg viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12"/><path d="M9 2v4M15 2v4M9 18v4M15 18v4M2 9h4M2 15h4M18 9h4M18 15h4"/></svg></button>
+    <span class="sp"></span>
+    <button type="button" id="nav-theme" aria-label="Light or dark mode"><svg class="sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1 7 17M17 7l2.1-2.1"/></svg><svg class="moon" viewBox="0 0 24 24"><path d="M20 14.5A8.5 8.5 0 0 1 9.5 4 8.5 8.5 0 1 0 20 14.5z"/></svg></button>
+  </div>
+  <div id="top">
+    <button class="name" id="homename" type="button">SENTINEL</button><span class="sep"></span>
+    <span class="crumb" id="crumb"></span><span class="sep"></span>
+    <button id="play" type="button">Start</button>
+    <div class="right"><span id="mode">REPLAY</span><span id="tc"></span><span class="sep"></span><span class="crumb">Table 1</span><span class="user">T1</span></div>
+  </div>
+
+  <div class="page" id="v-map">
+    <div class="panel" id="mapp">
+      <div id="mapworld">
+        <img id="mapimg" src="assets/map-ntu.jpg" alt="Map of the NTU campus" draggable="false">
+        <svg id="mapov" viewBox="0 0 3072 2048" aria-hidden="true"><defs><linearGradient id="swg" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#2f6bff" stop-opacity="0"/><stop offset="1" stop-color="#2f6bff" stop-opacity=".55"/></linearGradient></defs>
+          <g class="sweep"><path d="M1622 1108 L1622 830 A278 278 0 0 1 1819 911 Z" fill="url(#swg)"/><line x1="1622" y1="1108" x2="1819" y2="911" stroke="#8fb0ff" stroke-width="3"/></g>
+          <circle cx="1622" cy="1108" r="278" class="ping"/><circle cx="1622" cy="1108" r="278" class="ping p2"/>
+          <circle cx="1622" cy="1108" r="278" class="c1"/><circle cx="1622" cy="1108" r="144" class="c2"/><path d="M1622 1108 L1378 1019 A260 260 0 0 1 1533 864 Z" class="fov"/></svg>
+        <button id="sitepin" type="button" aria-label="Open the recordings of site NTU-01"><i></i><b>NTU-01</b></button>
+      </div>
+      <div id="sitecard">
+        <span class="cap">Sensor site</span>
+        <h3>NTU-01</h3><p>The Arc, Learning Hub North</p>
+        <div class="srow"><span>CAM-01</span><span class="pill">ONLINE</span></div>
+        <div class="srow"><span>RF-01</span><span class="pill">ONLINE</span></div>
+        <div class="srow"><span>MIC-01</span><span class="pill">ONLINE</span></div>
+        <div class="srow"><span>Saved recordings</span><b id="nrec"></b></div>
+        <button id="openrecs" type="button">Open recordings</button>
+      </div>
+      <span class="maptag" id="mapcoord">Drag to move. Scroll to zoom.</span>
+      <div id="zoomer"><button type="button" id="z-in" aria-label="Zoom in">+</button><button type="button" id="z-out" aria-label="Zoom out">&minus;</button><button type="button" id="z-home" aria-label="Go to the sensor site"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="6"/><path d="M12 2v5M12 17v5M2 12h5M17 12h5"/></svg></button></div>
+      <span class="maptag" id="mapattr">Map data: OpenStreetMap contributors</span>
+    </div>
+  </div>
+  <div class="page" id="v-recs">
+    <div class="panel" id="recp"><div class="phead"><span class="cap">Recordings</span><span class="r"><span class="meta" id="recmeta"></span></span></div><div id="rechead"><span></span><span>ID</span><span>Source</span><span>Sensors</span><span>Length</span><span>Decisions</span><span></span></div><div id="reclist"></div></div>
+  </div>
+  <div class="page" id="v-play">
+  <button class="panel feed" id="f-cam" type="button"><span class="phead"><span class="cap">Camera</span><span class="meta">CAM-01</span><span class="r"><span class="pill"></span><kbd>1</kbd></span></span><span class="view"><video id="video" muted playsinline preload="auto"></video><i class="scanl" id="scanl"></i><img id="still" alt="" hidden><i class="noise"></i><span class="osd tl" id="osd-src"></span><span class="osd bl" id="osd-t"></span><span class="osd tr">ALARM</span><span class="lost">NO SIGNAL<small>Example cause: weather</small></span></span></button>
+  <button class="panel feed" id="f-rf" type="button"><span class="phead"><span class="cap">RF receiver</span><span class="meta" id="rfband"></span><span class="r"><span class="pill"></span><kbd>2</kbd></span></span><span class="view"><img id="rfimg" alt="RF spectrogram"><i class="noise"></i><span class="lost">NO SIGNAL<small>Example cause: congested spectrum</small></span></span></button>
+  <button class="panel feed" id="f-aud" type="button"><span class="phead"><span class="cap">Microphone</span><span class="meta">MIC-01</span><span class="r"><span class="pill"></span><kbd>3</kbd></span></span><span class="view"><canvas class="media" id="wave" width="936" height="532"></canvas><i class="noise"></i><span class="lost">NO SIGNAL<small>Example cause: airport noise</small></span></span></button>
+
+  <div class="panel" id="detect">
+    <div class="phead"><span class="cap">Detection</span><span class="r"><span class="meta" id="dnum"></span></span></div>
+    <div id="dbody">
+      <div id="dleft">
+        <div id="badge">STANDBY</div>
+        <p id="result"></p>
+        <div id="inputs"><span class="cap">Inputs in this decision</span><div id="chips"><span>CAM</span><span>RF</span><span>AUD</span></div></div>
+      </div>
+      <div id="dright">
+        <svg id="gauge" viewBox="0 0 210 122"><path id="g-bg" d="M15 110 A90 90 0 0 1 195 110"/><path id="g-fg" d="M15 110 A90 90 0 0 1 195 110"/><line x1="105" y1="6" x2="105" y2="34" stroke="#e8edf4" stroke-width="3"/></svg>
+        <div id="gnum">--</div><span class="cap" id="glabel">Drone probability</span>
+        <div id="runway"><span class="cap">Runway</span><span id="advice">--</span></div>
+      </div>
+    </div>
+  </div>
+  <div class="panel" id="logp"><div class="phead"><span class="cap">Events</span><span class="r"><span class="meta" id="logn"></span></span></div><div id="log"></div></div>
+
+  <div class="panel" id="hist">
+    <div class="phead"><span class="cap">Decision timeline</span><span class="r"><span class="key"><i></i>Drone</span><span class="key"><i class="g"></i>No drone</span><span class="key" id="key-f"><i class="t"></i>Learned fusion</span><span class="meta" id="count"></span></span></div>
+    <div id="hbody"><div id="bars"><div class="th"><span>0.50</span></div></div><div id="rows"></div><div id="axis"></div><i id="head"></i></div>
+  </div>
+
+  </div>
+  <i id="flash"></i>
+  <div id="foot"><span id="foot-note"></span><span id="foot-keys"></span></div>
+ </div>
+ <div id="boot" hidden><i class="bh t"></i><i class="bh b"></i><div class="bc">
+   <svg viewBox="0 0 32 32"><g fill="none" stroke="#2f6bff" stroke-width="2.6" pathLength="1"><path pathLength="1" d="M4 17.5l12-12 12 12"/><path pathLength="1" d="M8 19.5l8-8 8 8"/><path pathLength="1" d="M12 21.5l4-4 4 4"/></g><rect x="14" y="23.5" width="4" height="4" fill="#2f6bff"/></svg>
+   <b data-t="SENTINEL">SENTINEL</b><p id="bootlines"></p><u><i></i></u></div></div>
+
+  <section id="s-model">
+    <h2 class="title" id="model-title"></h2>
+    <div id="mlanes"></div>
+    <div class="mlabel" id="lab-q" style="left:716px;top:122px">16 learned queries</div>
+    <div id="queries"></div>
+    <div class="mlabel" id="lab-b" style="left:975px;top:122px">2 fusion blocks</div>
+    <div class="block" id="blk1" style="left:975px"><span>Cross-attention</span><span>Self-attention</span><span>Feed-forward</span></div>
+    <div class="block" id="blk2" style="left:1085px"><span>Cross-attention</span><span>Self-attention</span><span>Feed-forward</span></div>
+    <div id="funnel"></div>
+    <div class="mlabel" id="lab-c" style="left:1265px;top:892px">Connector to 4,096 dimensions</div>
+    <div id="qwen">
+      <div class="qhead"><h3>Qwen3-VL-8B</h3><span>frozen</span></div>
+      <span class="cap">16 sensor tokens</span>
+      <div id="slots"></div>
+      <span class="cap">Question</span>
+      <p id="ask"></p>
+      <span class="cap ycap">Probability of yes</span>
+      <div class="yesrow"><b id="yesnum">0.00</b></div>
+      <div class="meter"><i id="yesbar"></i><u></u></div>
+      <div class="half">threshold 0.50</div>
+      <div class="qfoot"><span class="tag" id="yestag"></span><small id="yescap"></small></div>
+    </div>
+    <div id="mstages"><span><b>1</b>Encode</span><span><b>2</b>Fuse</span><span><b>3</b>Connect</span><span><b>4</b>Answer</span></div>
+    <div id="minfo"></div>
+    <div id="mstats">
+      <div><span class="cap">Sensor tokens</span><b><i id="st-tok">0</i> of 133</b></div>
+      <div><span class="cap">Learned queries</span><b id="st-q">0</b></div>
+      <div><span class="cap">Fusion blocks</span><b id="st-b">0</b></div>
+      <div><span class="cap">Token width</span><b id="st-w">512</b></div>
+      <div><span class="cap">Parts that we trained</span><b class="sm">RF network, fusion, connector</b></div>
+    </div>
+    <p id="mhint">Press X to go back to the console.</p>
+  </section>
+</div>
+
+<script src="demo_data.js"></script>
+<script>
+const DATA = window.SENTINEL, TH = DATA.threshold;
+const $ = id => document.getElementById(id);
+const stage = $("stage"), video = $("video");
+const reduced = matchMedia("(prefers-reduced-motion: reduce)").matches;
+const NAMES = ["Camera", "RF", "Audio"], LOGNAME = ["CAM-01", "RF-01", "MIC-01"], FEEDS = [$("f-cam"), $("f-rf"), $("f-aud")];
+function fit() { const s = Math.min(innerWidth / 1920, innerHeight / 1080); stage.style.transform = `scale(${s}) translate(-50%, -50%)`; }
+addEventListener("resize", fit); fit();
+
+/* One noise picture for a tile that has no signal. */
+(function () {
+  const c = document.createElement("canvas"); c.width = c.height = 128; const x = c.getContext("2d"), d = x.createImageData(128, 128);
+  for (let i = 0; i < d.data.length; i += 4) { const v = 20 + Math.random() * 150; d.data[i] = d.data[i + 1] = d.data[i + 2] = v; d.data[i + 3] = 255; }
+  x.putImageData(d, 0, 0); const url = `url(${c.toDataURL()})`;
+  document.querySelectorAll(".noise").forEach(n => { n.style.backgroundImage = url; });
+})();
+const GLEN = Math.PI * 90; $("g-fg").style.strokeDasharray = GLEN; $("g-fg").style.strokeDashoffset = GLEN;
+
+/* The colours of the console in dark mode and in light mode. The blue of the slide deck is the accent in the two modes. The sensor pictures stay on dark tiles. */
+const THEMES = {
+  dark:  { bg: "#161514", panel: "#1f1e1c", chrome: "#121110", well: "#0b0a0a", line: "#35332f", raised: "#2a2826", ink: "#ebe9e6", soft: "#b0aca6", dim: "#7f7b75", ok: "#8fb0ff", bar: "#57534d", pale: "#cfdcff" },
+  light: { bg: "#e9e7e3", panel: "#ffffff", chrome: "#f6f5f3", well: "#141312", line: "#d2cec8", raised: "#ebe8e4", ink: "#1a1917", soft: "#55514b", dim: "#77726b", ok: "#1746c9", bar: "#a39e96", pale: "#1a1917" },
+};
+let theme = "dark";
+try { theme = localStorage.getItem("sentinel-theme") === "light" ? "light" : "dark"; } catch (e) { /* The browser can refuse storage. The page then starts in dark mode. */ }
+const TH_C = { blue: "#2f6bff" };
+function applyTheme(name) {
+  theme = name; const root = document.documentElement, t = THEMES[name];
+  for (const k in t) root.style.setProperty("--" + k, t[k]);
+  root.style.setProperty("--rule", t.line); root.style.setProperty("--head", t.panel); root.dataset.theme = name; root.style.colorScheme = name;
+  try { localStorage.setItem("sentinel-theme", name); } catch (e) { /* The mode is then kept for this visit only. */ }
+}
+applyTheme(theme);
+
+/* State of the replay. `mask` holds the sensors that are on now. `used` holds the mask that each finished decision used. */
+let ci = Math.min(DATA.clips.length - 1, +(/clip=(\d)/.exec(location.hash) || [0, 0])[1]);
+let clip, mask, used, state, t0 = 0, snapT = 0, bars = [], rowCells = [], lastYes = null, events = 0;
+const isSnap = () => clip.kind === "snapshot";
+const external = () => clip.place !== "TRIDENT";
+const total = () => isSnap() ? 2.4 : clip.duration;
+const now = () => isSnap() ? snapT : video.currentTime;
+const done = t => isSnap() ? (t >= 1.2 ? 1 : 0) : clip.windows.filter(w => w.end <= t + 1e-6).length;
+const fmtMask = () => mask.join("");
+const allowed = m => clip.masks.includes(m);
+const tc = t => "00:" + t.toFixed(2).padStart(5, "0");
+const BW = 1844 - 2 - 84 - 64, BH = 150;
+function log(t, tag, text, cls = "") { const d = document.createElement("div"); d.className = cls; d.innerHTML = `<i></i><span>${tc(t)}</span><b>${tag}</b><em></em>`; d.lastChild.textContent = text; $("log").prepend(d); while ($("log").children.length > 8) $("log").lastChild.remove(); events++; $("logn").textContent = `${events} in this session`; }
+
+function loadClip() {
+  clip = DATA.clips[ci]; mask = [...clip.available].map(Number); used = []; state = "idle"; snapT = 0; events = 0;
+  $("osd-src").textContent = "CAM-01  " + clip.place.split(",")[0];
+  $("rfband").textContent = !clip.rf.length ? "RF-01" : /RFVS/.test(clip.place) ? "5.8 GHz" : "2.4 GHz";
+  if (isSnap()) { video.hidden = true; video.removeAttribute("src"); $("still").hidden = false; $("still").src = clip.poster; }
+  else { $("still").hidden = true; video.hidden = false; video.poster = clip.poster; video.src = clip.video; video.load(); }
+  /* Bars, sensor rows and the time axis. A decision is placed at the end time of its window, so the bars start at 1 s. */
+  const b = $("bars"); b.querySelectorAll("i, u, em, strong").forEach(e => e.remove()); bars = [];
+  const hop = isSnap() ? 1 : clip.windows.length > 1 ? clip.windows[1].start - clip.windows[0].start : 1, pitch = BW / clip.duration * hop, bw = Math.min(150, pitch * .72);
+  const xOf = k => clip.windows[k].end / clip.duration * BW - (pitch + bw) / 2;
+  if (isSnap()) ["SENTINEL (Qwen dropout)", "Learned fusion"].forEach((name, k) => { const x = 420 + k * 520, i = document.createElement("i"); i.style.cssText = `left:${x}px;width:200px`; b.appendChild(i); bars.push(i);
+    const e = document.createElement("em"); e.textContent = name; e.style.cssText = `left:${x - 40}px;width:280px`; b.appendChild(e); const s = document.createElement("strong"); s.style.cssText = `left:${x}px;width:200px`; b.appendChild(s); i._num = s; });
+  else clip.windows.forEach((w, k) => { const i = document.createElement("i"); i.style.cssText = `left:${xOf(k)}px;width:${bw}px`; b.appendChild(i); bars.push(i);
+    if (external()) { const u = document.createElement("u"); u.style.cssText = `left:${xOf(k) - 4}px;width:${bw + 8}px;bottom:0`; b.appendChild(u); i._tick = u; } });
+  $("key-f").hidden = isSnap() || !external();
+  const rows = $("rows"); rows.textContent = ""; rowCells = [];
+  if (!isSnap()) ["CAM", "RF", "AUD"].forEach(c => { const row = document.createElement("div"); row.innerHTML = `<span>${c}</span>`; rowCells.push(clip.windows.map((w, k) => { const i = document.createElement("i"); i.style.cssText = `left:${xOf(k)}px;width:${bw}px`; row.appendChild(i); return i; })); rows.appendChild(row); });
+  $("axis").innerHTML = isSnap() ? "" : Array.from({ length: 11 }, (_, s) => `<span style="left:${s * 10}%">${s} s</span>`).join("");
+  $("count").textContent = isSnap() ? "1 sample" : `${Math.round(1 / hop)} decision${hop < 1 ? "s" : ""} each second`;
+  $("log").textContent = ""; log(0, "SYSTEM", `Recording ${ci + 1} loaded`);
+  drawWave(0); setRf(0); paintFeeds(); paintIdle();
+}
+const EZ = "cubic-bezier(.2,.8,.2,1)";
+/* A short movement that marks a change: the element comes in from a small offset. */
+function pop(el, from = { opacity: 0, transform: "translateY(8px)" }, ms = 260) { if (!reduced) el.animate([from, { opacity: 1, transform: "none" }], { duration: ms, easing: EZ }); }
+function setBadge(text) { const b = $("badge"); if (b.textContent === text) return; b.textContent = text; pop(b, { opacity: 0, transform: "scale(.9)" }); }
+function setResult(text) { const r = $("result"); if (r.textContent === text) return; r.textContent = text; if (text) pop(r); }
+/* A new detection: an orange frame closes in from the page edge, the status badge lands, and the gauge kicks. The end of an alarm has no frame. */
+function burst(yes) {
+  if (reduced || !yes) return; const f = $("flash"); f.style.borderColor = "#ff6a1a";
+  f.animate([{ borderWidth: "22px", opacity: 1 }, { borderWidth: "0px", opacity: 0 }], { duration: 620, easing: "cubic-bezier(.2,.8,.2,1)" });
+  $("badge").animate([{ transform: "scale(1.9)", opacity: 0 }, { transform: "scale(.94)", opacity: 1, offset: .6 }, { transform: "none" }], { duration: 380, easing: "cubic-bezier(.3,0,.2,1)" }); $("gauge").animate([{ transform: "scale(1.18)" }, { transform: "none" }], { duration: 420, easing: EZ });
+}
+/* A line goes down the camera picture at each decision. */
+function scan() { if (reduced || !mask[0]) return; const h = $("scanl").parentElement.clientHeight; $("scanl").animate([{ transform: "translateY(0)", opacity: .9 }, { transform: `translateY(${h}px)`, opacity: 0 }], { duration: 230, easing: "linear" }); }
+/* The end of a replay: the count of correct decisions runs up to its saved value. */
+let celToken = 0;
+function celebrate(right, n, frameOn) {
+  if (reduced || isSnap()) return; const my = ++celToken, r = $("result"), final = r.textContent, start = performance.now();
+  if (final.includes(`${right} of ${n}`)) (function up(t) { if (my !== celToken || state !== "done") { return; } const f = Math.min(1, (t - start) / 700); r.textContent = final.replace(`${right} of ${n}`, `${Math.round(right * f)} of ${n}`); if (f < 1) requestAnimationFrame(up); else r.textContent = final; })(start);
+  if (right === n && frameOn) { const f = $("flash"); f.style.borderColor = "#2f6bff"; f.animate([{ borderWidth: "0px", opacity: 1 }, { borderWidth: "12px", opacity: 1, offset: .3 }, { borderWidth: "0px", opacity: 0 }], { duration: 700, easing: "ease-out" }); }
+}
+function setState(yes) { $("detect").className = "panel" + (yes === null ? "" : yes ? " drone" : " clear"); $("console").classList.toggle("alarm", yes === true); }
+function paintIdle() {
+  setState(null); setBadge("STANDBY"); setResult("Press Start to play the recording.");
+  $("g-fg").style.strokeDashoffset = GLEN; $("gnum").textContent = "--"; $("dnum").textContent = ""; $("advice").textContent = "--"; $("advice").className = "";
+  $("play").disabled = false; $("play").textContent = "Start"; $("head").style.opacity = 0; lastYes = null;
+  $("tc").textContent = isSnap() ? "single sample" : `${tc(0)} / ${tc(total())}`; $("osd-t").textContent = tc(0);
+  bars.forEach(b => { b.style.height = "0"; b.classList.remove("yes"); if (b._num) b._num.textContent = ""; if (b._tick) b._tick.style.opacity = 0; });
+  rowCells.flat().forEach(c => { c.className = ""; });
+  paintChips(fmtMask());
+}
+function paintChips(m) { [...$("chips").children].forEach((c, k) => { c.className = clip.available[k] !== "1" ? "na" : m[k] === "1" ? "" : "off"; }); }
+function paintFeeds() {
+  FEEDS.forEach((f, k) => { const have = clip.available[k] === "1"; f.classList.toggle("none", !have); f.classList.toggle("off", have && !mask[k]);
+    f.querySelector(".pill").textContent = !have ? "N/A" : mask[k] ? "ONLINE" : "OFFLINE"; });
+  if (state !== "live") paintChips(fmtMask());
+}
+function setRf(t) { const n = clip.rf.length; if (!n) { $("rfimg").removeAttribute("src"); $("rfimg").dataset.i = ""; return; } const i = Math.min(n - 1, Math.floor(t / total() * n)); if ($("rfimg").dataset.i !== ci + "-" + i) { $("rfimg").dataset.i = ci + "-" + i; $("rfimg").src = clip.rf[i]; } }
+function drawWave(t) {
+  const c = $("wave"), x = c.getContext("2d"), w = clip.wave, W = c.width, H = c.height; x.fillStyle = "#0b0a0a"; x.fillRect(0, 0, W, H);
+  x.strokeStyle = "#1f1e1c"; x.lineWidth = 2; for (let g = 1; g < 10; g++) { x.beginPath(); x.moveTo(g * W / 10, 0); x.lineTo(g * W / 10, H); x.stroke(); }
+  x.beginPath(); x.moveTo(0, H / 2); x.lineTo(W, H / 2); x.stroke();
+  if (!w.length) return; const at = t / total() * w.length, step = W / w.length;
+  w.forEach((v, i) => { x.fillStyle = i <= at ? TH_C.blue : "#4a4741"; const h = v * H * .8; x.fillRect(i * step, H / 2 - h / 2, Math.max(1, step - 1), h); });
+}
+
+/* A decision uses the saved value for its window and for the sensors that are on when the window ends. */
+function decide(k, quiet) {
+  const m = fmtMask(); used[k] = m; const w = clip.windows[isSnap() ? 0 : k], p = w.qwen[m], yes = p >= TH;
+  if (isSnap()) [w.qwen[m], w.fusion[m]].forEach((v, j) => { const h = Math.max(4, v * BH); bars[j].style.height = h + "px"; bars[j].classList.toggle("yes", v >= TH); bars[j]._num.textContent = v.toFixed(2); bars[j]._num.style.bottom = (h + 8) + "px"; });
+  else { bars[k].style.height = Math.max(4, p * BH) + "px"; bars[k].classList.toggle("yes", yes); rowCells.forEach((row, s) => { row[k].className = clip.available[s] !== "1" ? "" : m[s] === "1" ? "on" : "offl"; });
+    if (bars[k]._tick) { bars[k]._tick.style.bottom = (w.fusion[m] * BH - 1) + "px"; bars[k]._tick.style.opacity = 1; } }
+  setState(yes); paintChips(m);
+  setBadge(yes ? "DRONE DETECTED" : "NO DRONE"); setResult("");
+  $("g-fg").style.strokeDashoffset = GLEN * (1 - p); $("g-fg").classList.toggle("hi", yes); $("gnum").textContent = p.toFixed(2);
+  $("dnum").textContent = isSnap() ? "sample 1 of 1" : `decision ${k + 1} of ${clip.windows.length}`;
+  if ($("advice").textContent !== (yes ? "CLOSE" : "OPEN")) pop($("advice"), { opacity: 0, transform: "scale(.85)" }); $("advice").textContent = yes ? "CLOSE" : "OPEN"; $("advice").className = yes ? "closed" : "open";
+  if (!quiet) scan();
+  if (!quiet && yes !== lastYes) { burst(yes); }
+  if (!quiet && yes !== lastYes) log(isSnap() ? 0 : w.end, "DETECT", yes ? `Drone detected (${p.toFixed(2)})` : `No drone (${p.toFixed(2)})`, yes ? "al" : "");
+  lastYes = yes;
+}
+function tally(model = "qwen") {
+  const w = clip.windows, right = used.filter((m, k) => (w[isSnap() ? 0 : k][model][m] >= TH) === !!clip.label).length;
+  return { right, n: used.length };
+}
+function finish(fromSwitch) {
+  state = "done"; $("head").style.opacity = 0;
+  const { right, n } = tally(), f = tally("fusion").right, truth = clip.label ? "drone" : "no drone";
+  setState(null); setBadge("REPLAY COMPLETE"); paintChips(fmtMask());
+  if (isSnap()) { setResult(`Ground truth: ${truth}. SENTINEL is ${right ? "correct" : "wrong"}. Learned fusion is ${f ? "correct" : "wrong"}.`); log(0, "SYSTEM", `SENTINEL ${right ? "correct" : "wrong"}, fusion ${f ? "correct" : "wrong"}`, right ? "good" : "bad"); }
+  else { setResult(`Ground truth: ${truth}. Correct decisions: ${right} of ${n}.` + (external() ? ` Learned fusion: ${f} of ${n}.` : "")); log(total(), "SYSTEM", `Complete: ${right} of ${n} correct`, right === n ? "good" : ""); }
+  $("play").disabled = false; $("play").textContent = "Play again";
+  celebrate(right, n, !fromSwitch);
+}
+function frame() {
+  if (state !== "live") return;
+  if (isSnap()) snapT = (performance.now() - t0) / 1000;
+  const t = Math.min(total(), now()), k = done(t);
+  for (let i = used.length; i < k; i++) decide(i);
+  setRf(t); drawWave(t);
+  if (!isSnap()) { $("tc").textContent = `${tc(t)} / ${tc(total())}`; $("osd-t").textContent = tc(t); $("head").style.opacity = .85; $("head").style.left = (84 + t / total() * BW) + "px"; }
+  if (t >= total() - 1e-3 || (!isSnap() && video.ended)) { finish(); return; }
+  requestAnimationFrame(frame);
+}
+function startWatch() {
+  if (state === "live" || state === "paused" || xrayOn) return;
+  paintIdle(); used = []; state = "live"; $("play").disabled = true; setBadge("MONITORING"); setResult(isSnap() ? "" : "The first decision comes after 1 s.");
+  log(0, "SYSTEM", "Replay started");
+  if (isSnap()) { t0 = performance.now(); snapT = 0; } else { video.currentTime = 0; video.play().catch(() => {}); }
+  requestAnimationFrame(frame);
+}
+/* Switch one sensor. During the replay, the next decisions use the new set of sensors. After the replay, all decisions are shown again for the new set. */
+function toggle(k) {
+  const f = FEEDS[k]; if (xrayOn) return;
+  const next = [...mask]; next[k] = next[k] ? 0 : 1;
+  if (clip.available[k] !== "1" || !allowed(next.join(""))) { if (!reduced) { f.classList.remove("shake"); void f.offsetWidth; f.classList.add("shake"); } return; }
+  mask = next; paintFeeds();
+  log(state === "live" ? now() : state === "done" ? total() : 0, LOGNAME[k], mask[k] ? "Signal restored" : "Signal lost", mask[k] ? "" : "bad");
+  if (!reduced) { const fx = mask[k] ? "reboot" : "glitch"; f.classList.remove("cut", "glitch", "reboot"); void f.offsetWidth; f.classList.add(fx); }
+  if (state === "done") { const n = isSnap() ? 1 : clip.windows.length; used = []; for (let i = 0; i < n; i++) decide(i, true); finish(true); }
+}
+
+/* The inside of the model for the latest decision. The watch stops while this view is open. */
+let xrayOn = false, xbusy = false, xtoken = 0, SPEED = 0.72, xmask = "111", xwin = null, xk = 0;
+const XN = ["the camera", "RF", "audio"], QUESTION = "Is a drone present? Answer yes or no.", p2 = v => v.toFixed(2);
+const wait = ms => new Promise((res, rej) => { const my = xtoken; setTimeout(() => my === xtoken ? res() : rej(new Error("stop")), reduced ? 0 : ms / SPEED); });
+function tween(ms, draw) {
+  if (reduced) { draw(1); return Promise.resolve(); }
+  return new Promise((done, rej) => {
+    const my = xtoken; let last = performance.now(), f = 0;
+    const step = t => { if (my !== xtoken) { rej(new Error("stop")); return; } f = Math.min(1, f + (t - last) * SPEED / ms); last = t; draw(f); if (f < 1) requestAnimationFrame(step); else done(); };
+    requestAnimationFrame(step);
+  });
+}
+function animate(el, frames, ms, opts = {}) { return el.animate(frames, { duration: reduced ? 0 : ms / SPEED, delay: reduced ? 0 : (opts.delay || 0) / SPEED, easing: opts.easing || "cubic-bezier(.5,.05,.2,1)", fill: "both" }); }
+const clearAnims = el => el.getAnimations().forEach(a => a.cancel());
+/* The position of an element in page units, for parts that fly from one place to another. */
+function box(el) { const S = stage.getBoundingClientRect(), k = S.width / 1920, r = el.getBoundingClientRect(); return { x: (r.left - S.left) / k, y: (r.top - S.top) / k, w: r.width / k, h: r.height / k }; }
+function make(tag, cls, parent, css) { const e = document.createElement(tag); if (cls) e.className = cls; if (css) e.style.cssText = css; if (parent) parent.appendChild(e); return e; }
+/* Screen 2 parts: one lane for each sensor, then the queries, the fusion blocks, the connector and Qwen. */
+const LANES = [
+  { top: 185, tokTop: 170, countTop: 348, count: "8 frames × 16 tokens", groups: 8, per: 16, cls: "" },
+  { top: 470, tokTop: 498, countTop: 556, count: "4 tokens", groups: 4, per: 1, cls: "rf" },
+  { top: 700, tokTop: 728, countTop: 786, count: "1 token", groups: 1, per: 1, cls: "au" }
+];
+let mlanes = [], ranAt = 0;
+function buildModel() {
+  const c = clip, root = $("mlanes");
+  root.textContent = "";
+  mlanes = LANES.map((L, i) => {
+    const on = (xmask[i] === "1");
+    const thumb = make("div", "thumb" + (on ? "" : " off"), $("s-model"), `left:128px;top:${L.top}px`);
+    if (i === 0) make("img", "", thumb).src = c.poster;
+    else if (i === 1) { if (c.rf.length) make("img", "", thumb).src = $("rfimg").src; else make("canvas", "", thumb); }
+    else { const cv = make("canvas", "", thumb); cv.width = 260; cv.height = 260; const g = cv.getContext("2d"); g.fillStyle = "#141b30"; g.fillRect(0, 0, 260, 260); g.fillStyle = "#2f6bff"; const n = 40; for (let k = 0; k < n; k++) { const v = c.wave.length ? c.wave[Math.floor(k * c.wave.length / n)] : .06, h = Math.max(4, v * 190); g.fillRect(12 + k * 6, 130 - h / 2, 4, h); } }
+    const name = make("div", "lname", $("s-model"), `left:128px;top:${L.top + 138}px`); name.textContent = NAMES[i];
+    const wire = make("div", "wire" + (on ? "" : " off"), $("s-model"), `left:270px;top:${L.top + 64}px`);
+    const toks = make("div", "toks " + (i === 0 ? "cam" : "big"), $("s-model"), `left:330px;top:${L.tokTop}px`);
+    const groups = [];
+    for (let gI = 0; gI < L.groups; gI++) {
+      const holder = i === 0 ? make("div", "grp", toks) : toks, list = [];
+      for (let k = 0; k < L.per; k++) list.push(make("i", "tk " + L.cls + (on ? "" : " mask"), holder));
+      groups.push({ el: i === 0 ? holder : list[0], list });
+    }
+    const count = make("div", "count" + (on ? "" : " off"), $("s-model"), `left:330px;top:${L.countTop}px`); count.textContent = on ? L.count : c.available[i] === "1" ? "Offline: masked" : "Not recorded: masked";
+    const enc = make("div", "enc", $("s-model"), `left:330px;top:${L.countTop + 28}px`); enc.textContent = ENC[i];
+    [thumb, name, wire, toks, count, enc].forEach(e => root.appendChild(e));
+    return { on, thumb, name, wire, toks, groups, count, enc };
+  });
+  const q = $("queries"); q.textContent = ""; clearAnims(q);
+  for (let i = 0; i < 16; i++) make("i", "", q, `top:${i * 44}px`);
+  $("slots").innerHTML = "<i></i>".repeat(16);
+  ["lab-q", "lab-b", "lab-c", "blk1", "blk2", "funnel", "qwen"].forEach(id => { $(id).classList.remove("on", "faded", "live", "answer"); clearAnims($(id)); });
+  $("ask").textContent = ""; $("yesnum").textContent = "0.00"; clearAnims($("yesbar"));
+  $("qwen").classList.toggle("isdrone", xwin.qwen[xmask] >= TH);
+  mStage(0); ["st-tok", "st-q", "st-b"].forEach(id => { $(id).textContent = "0"; }); $("st-w").textContent = "512"; document.querySelectorAll(".block span").forEach(e => e.classList.remove("lit"));
+  $("minfo").textContent = (c.windows.length > 1 ? `REC-00${ci + 1}  decision ${xk + 1} of ${c.windows.length}  window ${xwin.start.toFixed(2)} s to ${xwin.end.toFixed(2)} s` : `REC-00${ci + 1}  one sample`);
+  $("yestag").textContent = ""; $("yescap").textContent = "";
+  const off = [0, 1, 2].filter(i => !(xmask[i] === "1") && c.available[i] === "1").map(i => XN[i]);
+  const list = off.join(" and "), cap = list.slice(0, 1).toUpperCase() + list.slice(1);
+  $("model-title").textContent = off.length === 0 ? "Each sensor turns into tokens." : off.length === 1 ? `${cap} is offline and sends no tokens.` : `${cap} are offline and send no tokens.`;
+}
+function flyDot(from, to, ms = 650) {
+  if (reduced) return;
+  const a = box(from), b = box(to), d = make("span", "fly", stage);
+  const x0 = a.x + a.w / 2 - 6, y0 = a.y + a.h / 2 - 6, x1 = b.x + b.w / 2 - 6, y1 = b.y + b.h / 2 - 6;
+  d.style.left = x0 + "px"; d.style.top = y0 + "px";
+  const anim = d.animate([{ transform: "translate(0,0) scale(1)", opacity: 1 }, { transform: `translate(${x1 - x0}px, ${y1 - y0}px) scale(.6)`, opacity: .85 }], { duration: ms / SPEED, easing: "cubic-bezier(.3,.6,.3,1)" });
+  anim.onfinish = () => d.remove();
+}
+/* A small copy of the sensor picture flies to a token place, and the tokens appear there. */
+function emit(lane, g, delay) {
+  const grp = lane.groups[g], on = () => grp.list.forEach((t, k) => setTimeout(() => t.classList.add("on"), reduced ? 0 : k * 14 / SPEED));
+  if (reduced) { on(); return; }
+  const my = xtoken;
+  const a = box(lane.thumb), b = box(grp.el), m = make("div", "mini", stage, `left:${a.x}px;top:${a.y}px;width:${a.w}px;height:${a.h}px`);
+  const src = lane.thumb.firstElementChild;
+  if (src.tagName === "IMG") make("img", "", m).src = src.src;
+  else { const cv = make("canvas", "", m); cv.width = src.width; cv.height = src.height; cv.getContext("2d").drawImage(src, 0, 0); }
+  const s = Math.max(b.w, 44) / a.w, dx = b.x + b.w / 2 - (a.x + a.w / 2), dy = b.y + b.h / 2 - (a.y + a.h / 2);
+  const an = animate(m, [{ transform: "none", opacity: 0 }, { transform: "none", opacity: 1, offset: .12 }, { transform: `translate(${dx}px, ${dy}px) scale(${s})`, opacity: 1, offset: .82 }, { transform: `translate(${dx}px, ${dy}px) scale(${s * .5})`, opacity: 0 }], 760, { delay });
+  an.finished.then(() => m.remove());
+  setTimeout(() => { if (my === xtoken) on(); }, (delay + 560) / SPEED);
+}
+/* One sensor arrives: a large picture flies in with a line behind it, stops in the middle, then goes to its place. There it turns into tokens. An offline sensor arrives in grey with a red label, and its token places stay empty. */
+const HERO = [{ from: "translate(-1500px, -140px) rotate(-9deg) scale(1.45)", name: "Camera", info: "8 frames" }, { from: "translate(-1500px, 0px) rotate(-9deg) scale(1.45)", name: "RF", info: "4 spectrograms" }, { from: "translate(-1500px, 140px) rotate(-9deg) scale(1.45)", name: "Audio", info: "1 second" }];
+const ENC = ["Qwen3-VL vision encoder, frozen", "RF network, trained from scratch", "CLAP audio encoder, frozen"];
+function mStage(n) { [...$("mstages").children].forEach((c, i) => { c.classList.toggle("on", i === n); c.classList.toggle("done", i < n); }); }
+function mCount(id, to, ms = 600) { tween(ms, f => { $(id).textContent = Math.round(to * f); }).catch(() => {}); }
+function hero(l, i) {
+  const land = () => { l.thumb.classList.add("on"); };
+  if (reduced) { land(); return; }
+  const my = xtoken, H = HERO[i], h = make("div", "hero" + (l.on ? "" : " off"), $("s-model")), src = l.thumb.firstElementChild;
+  if (src.tagName === "IMG") make("img", "", h).src = src.src; else { const cv = make("canvas", "", h); cv.width = src.width; cv.height = src.height; cv.getContext("2d").drawImage(src, 0, 0); }
+  make("b", "", h).innerHTML = `${H.name}<small>${l.on ? H.info : clip.available[i] === "1" ? "OFFLINE" : "NOT INSTALLED"}</small>`;
+  const top = LANES[i].top, end = `translate(${128 - 750}px, ${top - 300}px) scale(${130 / 420})`;
+  const st = make("i", "streak", $("s-model"), `left:128px;top:${top + 63}px;width:830px`);
+  st.animate([{ transform: "scaleX(0)", opacity: 0 }, { transform: "scaleX(1)", opacity: .9, offset: .35 }, { transform: "scaleX(1)", opacity: 0 }], { duration: 900 / SPEED, delay: 560 / SPEED, easing: "ease-out", fill: "both" }).finished.then(() => st.remove(), () => st.remove());
+  h.animate([{ transform: H.from, opacity: 0 }, { transform: "none", opacity: 1, offset: .32, easing: "cubic-bezier(.2,.9,.3,1)" }, { transform: "scale(1.04)", opacity: 1, offset: .58, easing: "cubic-bezier(.6,0,.2,1)" }, { transform: end, opacity: 1, offset: .96 }, { transform: end, opacity: 0 }], { duration: 1280 / SPEED, easing: "linear", fill: "both" })
+    .finished.then(() => { h.remove(); if (my === xtoken) land(); }, () => h.remove());
+}
+/* Run a step later, but only if the model view is still open. */
+function later(ms, fn) { const my = xtoken; setTimeout(() => { if (my === xtoken) fn(); }, reduced ? 0 : ms / SPEED); }
+/* The steps overlap, so the view moves from the sensors to the answer with no stop: tokens, queries, fusion blocks, connector, question and answer. */
+async function flow() {
+  const c = clip, qs = [...$("queries").children], slots = [...$("slots").children];
+  mlanes.forEach((l, i) => later(i * 820, () => hero(l, i)));
+  /* When the three sensors are in place, each one turns into tokens, from the top to the bottom. */
+  mlanes.forEach((l, i) => later(3050 + i * 520, () => { l.wire.classList.add("on");
+    if (l.on) l.groups.forEach((_, g) => emit(l, g, g * (l.groups.length > 4 ? 45 : 70))); else l.groups.forEach(g => g.list.forEach(t => t.classList.add("on")));
+    later(380, () => { l.count.classList.add("on"); l.enc.classList.add("on"); }); }));
+  later(4750, () => { $("lab-q").classList.add("on"); qs.forEach((q, i) => later(i * 30, () => q.classList.add("on"))); mCount("st-q", 16); });
+  await wait(5500);
+  mStage(1); mCount("st-tok", mlanes.reduce((n, l, i) => n + (l.on ? [128, 4, 1][i] : 0), 0), 700);
+  mlanes.forEach(l => { if (l.on) l.toks.classList.add("read"); });
+  const sources = mlanes.filter(l => l.on).flatMap(l => l.groups.map(g => g.el));
+  for (let r = 0; r < 2; r++) for (let i = 0; i < 16; i++) {
+    flyDot(sources[(i * 5 + r * 3) % sources.length], qs[i], 460);
+    if (r === 0) later(420, () => qs[i].classList.add("lit"));
+    await wait(24);
+  }
+  ["blk1", "blk2", "lab-b"].forEach(id => $(id).classList.add("on")); mCount("st-b", 2, 300);
+  await wait(330);
+  ["blk1", "blk2"].forEach((id, b) => [...$(id).children].forEach((sp, k) => { later(120 + b * 430 + k * 130, () => sp.classList.add("lit")); later(520 + b * 430 + k * 130, () => sp.classList.remove("lit")); }));
+  const slide = animate($("queries"), [{ transform: "none" }, { transform: "translateX(385px)" }], 1200, { easing: "cubic-bezier(.45,.05,.4,1)" });
+  const glow = [{ borderColor: TH_C.blue, boxShadow: "none" }, { background: "rgba(47,107,255,.5)", borderColor: TH_C.blue }, { borderColor: TH_C.blue }];
+  animate($("blk1"), glow, 550, { delay: 150, easing: "ease-in-out" }).finished.then(a => a.cancel(), () => {});
+  animate($("blk2"), glow, 550, { delay: 560, easing: "ease-in-out" }).finished.then(a => a.cancel(), () => {});
+  later(450, () => {
+    mlanes.forEach(l => { l.toks.classList.remove("read"); [l.thumb, l.name, l.wire, l.toks, l.count, l.enc].forEach(e => e.classList.add("faded")); }); $("lab-q").classList.add("faded"); mStage(2);
+    ["funnel", "lab-c", "qwen"].forEach(id => $(id).classList.add("on"));
+  });
+  await slide.finished;
+  ["blk1", "blk2", "lab-b"].forEach(id => $(id).classList.add("faded"));
+  const fb = box($("funnel")), exitX = fb.x + fb.w - 20, exitY = fb.y + fb.h / 2 - 15;
+  const moves = qs.map((q, i) => {
+    const a = box(q), b = box(slots[i]), dx = b.x + b.w / 2 - (a.x + a.w / 2), dy = b.y + b.h / 2 - (a.y + a.h / 2);
+    return animate(q, [{ transform: "none" }, { transform: `translate(${exitX - a.x}px, ${exitY - a.y + (i - 7.5) * 2}px) scale(.5)`, offset: .55 }, { transform: `translate(${dx}px, ${dy}px) scale(.74)` }], 760, { delay: i * 26, easing: "cubic-bezier(.5,.1,.3,1)" });
+  });
+  later(300, () => { $("qwen").classList.add("live"); $("st-w").textContent = "4,096"; pop($("st-w"), { opacity: 0, transform: "translateY(10px)" }); });
+  const typing = wait(300).then(() => tween(750, f => { $("ask").textContent = QUESTION.slice(0, Math.ceil(f * QUESTION.length)); }));
+  await Promise.all([...moves.map(m => m.finished), typing]);
+  $("funnel").classList.add("faded"); $("lab-c").classList.add("faded");
+  const p = xwin.qwen[xmask];
+  $("yescap").textContent = c.windows.length > 1 ? `Decision ${xk + 1} of ${c.windows.length}` : "One saved sample";
+  $("qwen").classList.add("answer"); mStage(3);
+  animate($("yesbar"), [{ transform: "scaleX(0)" }, { transform: `scaleX(${Math.max(.012, p)})` }], 650, { easing: "cubic-bezier(.2,.9,.3,1)" });
+  await tween(650, f => { $("yesnum").textContent = p2(p * (1 - Math.pow(1 - f, 3))); });
+  $("yesnum").textContent = p2(p);
+  $("yestag").textContent = p >= TH ? "drone" : "no drone"; $("yestag").className = "tag" + (p >= TH ? " yes" : "");
+  pop($("yestag"), { opacity: 0, transform: "scale(1.8)" }, 320); mStage(4);
+}
+/* The change of page is one continuous push: the console grows toward the viewer and fades, and at the same time the model view grows to its full size and fades in. */
+const ZO = "630px 370px", ZE = "cubic-bezier(.5,0,.15,1)", ZT = 520;
+async function zoom(toModel) {
+  const con = $("console"), mod = $("s-model");
+  if (reduced) { if (toModel) { mod.classList.add("show"); buildModel(); } else mod.classList.remove("show"); return; }
+  con.style.transformOrigin = ZO; mod.style.transformOrigin = ZO; con.style.willChange = mod.style.willChange = "transform, opacity";
+  const far = { transform: "scale(2.6)", opacity: 0 }, near = { transform: "scale(.72)", opacity: 0 }, here = { transform: "scale(1)", opacity: 1 }, o = { duration: ZT, easing: ZE, fill: "both" };
+  if (toModel) { mod.classList.add("show"); buildModel(); }
+  const a = con.animate(toModel ? [here, far] : [far, here], o), b = mod.animate(toModel ? [near, here] : [here, near], o);
+  await Promise.all([a.finished, b.finished]);
+  if (!toModel) mod.classList.remove("show");
+  a.cancel(); b.cancel(); con.style.willChange = mod.style.willChange = "";
+}
+async function openModel() {
+  if (xbusy || xrayOn || view !== "play") return;
+  if (state === "live") { state = "paused"; if (clip.video) video.pause(); }
+  xrayOn = true; xbusy = true; xtoken++; SPEED = 0.72;
+  xk = Math.max(0, used.length - 1); xwin = clip.windows[isSnap() ? 0 : xk]; xmask = used[xk] || fmtMask();
+  await zoom(true);
+  xbusy = false;
+  try { await flow(); } catch (e) { /* The presenter closed the view before the end. */ }
+}
+async function closeModel() {
+  if (xbusy || !xrayOn) return;
+  xtoken++; xbusy = true; SPEED = 1;
+  document.querySelectorAll(".fly, .mini, .hero, .streak").forEach(e => e.remove());
+  await zoom(false);
+  xrayOn = false; xbusy = false;
+  if (state === "paused") { state = "live"; if (isSnap()) t0 = performance.now() - snapT * 1000; else video.play().catch(() => {}); requestAnimationFrame(frame); }
+}
+
+/* Pages. The map is the start page. The recordings page lists the saved recordings. A recording opens on the playback page. */
+let view = "map", sel = 0;
+$("nrec").textContent = DATA.clips.length; $("recmeta").textContent = `${DATA.clips.length} saved`;
+$("reclist").innerHTML = DATA.clips.map((c, i) => `<button class="rec" type="button"><span class="rthumb"><img src="${c.poster}" alt=""></span><b>REC-00${i + 1}</b><span>${c.place}</span><span class="s">${["CAM", "RF", "AUD"].map((n, k) => `<i class="${c.available[k] === "1" ? "" : "na"}">${n}</i>`).join("")}</span><span class="mono">${c.kind === "snapshot" ? "1 sample" : c.duration.toFixed(2) + " s"}</span><span class="mono">${c.windows.length}</span><span class="open">Open</span></button>`).join("");
+const RECS = [...$("reclist").children];
+function setCrumb() { $("crumb").innerHTML = view === "map" ? "Map / <b>NTU campus</b>" : view === "recs" ? "<b>Recordings</b>" : `Recordings / <b>REC-00${ci + 1}, ${clip.place}</b>`; }
+const KEYS = {
+  map: "<kbd>Arrows</kbd>move<kbd>+</kbd><kbd>-</kbd>zoom<kbd>0</kbd>sensor site<kbd>R</kbd>recordings<kbd>T</kbd>light or dark",
+  recs: "<kbd>1</kbd>to<kbd>5</kbd>open a recording<kbd>M</kbd>map<kbd>T</kbd>light or dark",
+  play: "<kbd>Space</kbd>start<kbd>1</kbd><kbd>2</kbd><kbd>3</kbd>sensor off or on<kbd>X</kbd>model view<kbd>N</kbd>next<kbd>R</kbd>recordings",
+};
+function showView(name) {
+  if (xrayOn) return;
+  if (view === "play" && name !== "play") { if (clip.video) video.pause(); if (state === "live") state = "idle"; }
+  if (name === "recs") sel = -1;
+  view = name; $("console").dataset.view = name; if (name !== "play") $("console").classList.remove("alarm");
+  ["map", "recs", "play"].forEach(v => $("v-" + v).classList.toggle("show", v === name));
+  $("nav-map").classList.toggle("on", name === "map"); $("nav-recs").classList.toggle("on", name !== "map");
+  setCrumb(); $("foot-keys").innerHTML = KEYS[name];
+  $("foot-note").textContent = name === "map" ? "The sensor site on this map is an example. Map data: OpenStreetMap contributors." : name === "recs" ? "Media from the TRIDENT (Alla et al., 2025), Halmstad drone (Svanström et al., 2021) and RFVS datasets. Replay of saved model outputs." : "Replay of saved model outputs. No model runs on this page.";
+  RECS.forEach((r, i) => r.classList.toggle("sel", i === sel));
+  RECS.forEach((r, i) => preview(i, name === "recs" && i === sel));
+  if (!reduced) reveal(name);
+}
+/* A new page comes in. The map opens as a circle from the sensor site. The other pages come in behind a blue edge that crosses the page, and their parts rise in order. */
+function reveal(name) {
+  const page = $("v-" + name);
+  if (name === "map") {
+    const x = MAP.x + MAP.px * MAP.z + 64, y = MAP.y + MAP.py * MAP.z + 60;
+    page.animate([{ clipPath: `circle(0px at ${x}px ${y}px)` }, { clipPath: `circle(2300px at ${x}px ${y}px)` }], { duration: 900, easing: "cubic-bezier(.3,0,.2,1)" });
+    $("sitecard").animate([{ opacity: 0, transform: "translateX(-40px)" }, { opacity: 1, transform: "none" }], { duration: 420, delay: 380, easing: EZ, fill: "backwards" });
+    $("sitepin").animate([{ transform: "translate(-13px, -13px) scale(3.2)", opacity: 0 }, { transform: "translate(-13px, -13px) scale(1)", opacity: 1 }], { duration: 480, delay: 120, easing: "cubic-bezier(.2,1.5,.4,1)", fill: "backwards" });
+    return;
+  }
+  page.animate([{ clipPath: "inset(0 100% 0 0)" }, { clipPath: "inset(0 0 0 0)" }], { duration: 480, easing: "cubic-bezier(.5,0,.15,1)" });
+  const e = document.createElement("i"); e.className = "edge"; $("console").appendChild(e);
+  e.animate([{ left: "52px" }, { left: "1920px" }], { duration: 480, easing: "cubic-bezier(.5,0,.15,1)" }).finished.then(() => e.remove(), () => e.remove());
+  const parts = name === "play" ? [...document.querySelectorAll("#v-play .panel")] : [$("rechead"), ...RECS];
+  parts.forEach((p, k) => p.animate([{ opacity: 0, transform: name === "recs" ? "translateX(-46px)" : "translateY(26px) scale(.985)" }, { opacity: 1, transform: "none" }], { duration: 460, delay: 90 + k * 55, easing: EZ, fill: "backwards" }));
+}
+/* The picture in a row of the list plays the recording while the pointer is on the row, or while the row is selected. */
+function preview(i, on) {
+  const c = DATA.clips[i], th = RECS[i].querySelector(".rthumb"); let v = th.querySelector("video");
+  if (on && c.video && !v && !reduced) { v = document.createElement("video"); v.muted = true; v.loop = true; v.playsInline = true; v.src = c.video; th.appendChild(v); v.play().catch(() => {}); }
+  else if (!on && v) v.remove();
+}
+/* The map: drag, glide after a drag, smooth arrow keys, and zoom with the wheel, the buttons or the plus and minus keys. The map stops at its edges. */
+const MAP = { x: 0, y: 0, z: 1, w: 3072, h: 2048, vw: 1842, vh: 976, px: 1622, py: 1108, moved: false, zmin: .62, zmax: 2.6 };
+let mapRun = 0;
+function mapSet(x, y, z = MAP.z) {
+  MAP.z = Math.min(MAP.zmax, Math.max(MAP.zmin, z));
+  MAP.x = Math.min(0, Math.max(MAP.vw - MAP.w * MAP.z, x)); MAP.y = Math.min(0, Math.max(MAP.vh - MAP.h * MAP.z, y));
+  const w = $("mapworld"); w.style.transform = `translate(${MAP.x}px, ${MAP.y}px) scale(${MAP.z})`; w.style.setProperty("--iz", 1 / MAP.z);
+}
+/* Zoom to z and keep the map point under (cx, cy) in place. */
+function zoomAt(cx, cy, z) { const k = Math.min(MAP.zmax, Math.max(MAP.zmin, z)), wx = (cx - MAP.x) / MAP.z, wy = (cy - MAP.y) / MAP.z; mapSet(cx - wx * k, cy - wy * k, k); }
+/* Move and zoom to a target in a smooth way. */
+function mapTo(x, y, z, ms = 420) {
+  const my = ++mapRun, a = { x: MAP.x, y: MAP.y, z: MAP.z }, t0 = performance.now(); if (reduced) { mapSet(x, y, z); return; }
+  (function step(t) { if (my !== mapRun) return; const f = Math.min(1, (t - t0) / ms), e = 1 - Math.pow(1 - f, 3); mapSet(a.x + (x - a.x) * e, a.y + (y - a.y) * e, a.z + (z - a.z) * e); if (f < 1) requestAnimationFrame(step); })(t0);
+}
+const mapHome = (z = 1) => [1180 - MAP.px * z, 500 - MAP.py * z, z];
+function zoomBy(f) { const z = Math.min(MAP.zmax, Math.max(MAP.zmin, MAP.z * f)), cx = MAP.vw / 2, cy = MAP.vh / 2, wx = (cx - MAP.x) / MAP.z, wy = (cy - MAP.y) / MAP.z; mapTo(cx - wx * z, cy - wy * z, z, 300); }
+mapSet(...mapHome());
+(function () {
+  const pane = $("mapp"); let start = null, last = null, vx = 0, vy = 0;
+  const scale = () => stage.getBoundingClientRect().width / 1920;
+  pane.addEventListener("pointerdown", e => { if (e.target.closest("#sitecard, #zoomer")) return; mapRun++; vx = vy = 0; last = null; start = { px: e.clientX, py: e.clientY, x: MAP.x, y: MAP.y, k: scale() }; MAP.moved = false; });
+  addEventListener("pointermove", e => { if (!start) return; const dx = (e.clientX - start.px) / start.k, dy = (e.clientY - start.py) / start.k; if (!MAP.moved && Math.hypot(dx, dy) < 5) return; MAP.moved = true; pane.classList.add("drag"); mapSet(start.x + dx, start.y + dy);
+    const t = performance.now(); if (last && t > last.t) { vx = (dx - last.dx) / (t - last.t); vy = (dy - last.dy) / (t - last.t); } last = { dx, dy, t }; });
+  const glideOn = () => { const my = ++mapRun; let t0 = performance.now(); (function slide(t) { if (my !== mapRun) return; const dt = Math.min(40, t - t0); t0 = t; vx *= Math.pow(.94, dt / 16); vy *= Math.pow(.94, dt / 16); mapSet(MAP.x + vx * dt, MAP.y + vy * dt); if (Math.hypot(vx, vy) > .02) requestAnimationFrame(slide); })(t0); };
+  addEventListener("pointerup", () => { const was = start; start = null; pane.classList.remove("drag"); if (was && MAP.moved && !reduced) glideOn(); });
+  addEventListener("pointercancel", () => { start = null; pane.classList.remove("drag"); });
+  pane.addEventListener("wheel", e => { e.preventDefault(); mapRun++; const r = pane.getBoundingClientRect(), k = scale(); zoomAt((e.clientX - r.left) / k, (e.clientY - r.top) / k, MAP.z * Math.exp(-e.deltaY * .0016)); }, { passive: false });
+  /* Arrow keys: the map gets speed while a key is down, and it slows down after the key is up. */
+  const held = new Set(); let moving = false;
+  addEventListener("keydown", e => { if (view !== "map" || xrayOn || !e.key.startsWith("Arrow")) return; e.preventDefault(); held.add(e.key); if (moving) return; moving = true; const my = ++mapRun; let t0 = performance.now();
+    (function step(t) { if (my !== mapRun || view !== "map") { moving = false; held.clear(); return; } const dt = Math.min(40, t - t0); t0 = t;
+      const tx = (held.has("ArrowLeft") ? 1 : 0) - (held.has("ArrowRight") ? 1 : 0), ty = (held.has("ArrowUp") ? 1 : 0) - (held.has("ArrowDown") ? 1 : 0), a = 1 - Math.pow(.86, dt / 16);
+      vx += (tx * 1.1 - vx) * a; vy += (ty * 1.1 - vy) * a; mapSet(MAP.x + vx * dt, MAP.y + vy * dt);
+      if (held.size || Math.hypot(vx, vy) > .015) requestAnimationFrame(step); else moving = false; })(t0); });
+  addEventListener("keyup", e => held.delete(e.key)); addEventListener("blur", () => held.clear());
+  $("z-in").onclick = () => zoomBy(1.5); $("z-out").onclick = () => zoomBy(1 / 1.5); $("z-home").onclick = () => mapTo(...mapHome(), 600);
+})();
+function go(i) {
+  if (xrayOn) return; if (clip.video) video.pause();
+  const from = view === "recs" && !reduced ? box(RECS[i].querySelector(".rthumb")) : null;
+  ci = i; loadClip(); showView("play");
+  if (!from) return;
+  const to = box($("f-cam").querySelector(".view")), im = document.createElement("img"); im.className = "flyimg"; im.src = clip.poster;
+  im.style.cssText = `left:${to.x}px;top:${to.y}px;width:${to.w}px;height:${to.h}px;transform-origin:0 0`; $("console").appendChild(im);
+  im.animate([{ transform: `translate(${from.x - to.x}px, ${from.y - to.y}px) scale(${from.w / to.w}, ${from.h / to.h})`, opacity: 1 }, { transform: "none", opacity: 1, offset: .82 }, { transform: "none", opacity: 0 }], { duration: 620, easing: "cubic-bezier(.5,0,.15,1)" }).finished.then(() => im.remove(), () => im.remove());
+}
+function pick(i) { sel = ((i < -1 ? RECS.length - 1 : i) + RECS.length) % RECS.length; RECS.forEach((r, k) => { r.classList.toggle("sel", k === sel); preview(k, k === sel); }); }
+function toggleTheme() {
+  const run = () => applyTheme(theme === "dark" ? "light" : "dark");
+  if (reduced || !document.startViewTransition) { run(); return; }
+  const r = $("nav-theme").getBoundingClientRect(), x = r.left + r.width / 2, y = r.top + r.height / 2;
+  document.startViewTransition(run).ready.then(() => document.documentElement.animate({ clipPath: [`circle(0px at ${x}px ${y}px)`, `circle(${Math.hypot(innerWidth, innerHeight)}px at ${x}px ${y}px)`] }, { duration: 650, easing: "cubic-bezier(.4,0,.2,1)", pseudoElement: "::view-transition-new(root)" }), () => {});
+}
+addEventListener("keydown", e => {
+  if (e.ctrlKey || e.metaKey || e.altKey) return;
+  const k = e.key.toLowerCase();
+  if (k === "x") { e.preventDefault(); xrayOn ? closeModel() : openModel(); return; }
+  if (xrayOn) { if (k === "escape") closeModel(); return; }
+  if (k === "t") { toggleTheme(); return; }
+  if (k === "m") { showView("map"); return; }
+  if (k === "r" || (k === "escape" && view === "play")) { showView("recs"); return; }
+  if (view === "map") { if (k === "enter" || k === " ") { e.preventDefault(); flyToRecs(); } else if (k === "+" || k === "=") zoomBy(1.5); else if (k === "-" || k === "_") zoomBy(1 / 1.5); else if (k === "0" || k === "h") mapTo(...mapHome(), 600); }
+  else if (view === "recs") {
+    if (/^[1-9]$/.test(k) && +k <= RECS.length) go(+k - 1);
+    else if (k === "arrowdown") { e.preventDefault(); pick(sel + 1); } else if (k === "arrowup") { e.preventDefault(); pick(sel - 1); }
+    else if ((k === "enter" || k === " ") && sel >= 0) { e.preventDefault(); go(sel); }
+  } else {
+    if (k === " " || k === "enter") { e.preventDefault(); startWatch(); }
+    else if ("123".includes(k)) toggle(+k - 1);
+    else if (k === "n") go((ci + 1) % DATA.clips.length);
+  }
+});
+FEEDS.forEach((f, k) => { f.onclick = () => { f.blur(); toggle(k); }; });
+$("play").onclick = () => { $("play").blur(); startWatch(); };
+$("railmodel").onclick = () => { $("railmodel").blur(); openModel(); };
+$("nav-map").onclick = () => { $("nav-map").blur(); showView("map"); };
+$("homelogo").onclick = $("homename").onclick = () => { $("homename").blur(); showView("map"); };
+$("nav-recs").onclick = () => { $("nav-recs").blur(); showView("recs"); };
+$("nav-theme").onclick = () => { $("nav-theme").blur(); toggleTheme(); };
+/* The map flies into the sensor site, then the list of recordings opens. */
+let flying = false;
+function flyToRecs() {
+  if (flying) return; if (reduced) { showView("recs"); return; }
+  flying = true; mapRun++; const w = $("mapworld"), Z = Math.max(3.4, MAP.z * 2.2);
+  const a = w.animate([{ transform: `translate(${MAP.x}px, ${MAP.y}px) scale(${MAP.z})`, opacity: 1 }, { transform: `translate(${921 - MAP.px * Z}px, ${488 - MAP.py * Z}px) scale(${Z})`, opacity: .15 }], { duration: 600, easing: "cubic-bezier(.6,0,.9,.4)" });
+  $("sitecard").animate([{ opacity: 1, transform: "none" }, { opacity: 0, transform: "translateX(-60px)" }], { duration: 300, easing: "ease-in", fill: "forwards" });
+  a.finished.then(() => { flying = false; showView("recs"); $("sitecard").getAnimations().forEach(x => x.cancel()); }, () => { flying = false; });
+}
+$("openrecs").onclick = () => flyToRecs();
+$("sitepin").onclick = () => { if (!MAP.moved) flyToRecs(); };
+RECS.forEach((r, i) => { r.onclick = () => { r.blur(); go(i); }; r.onmouseenter = () => preview(i, true); r.onmouseleave = () => preview(i, i === sel && view === "recs"); });
+loadClip();
+showView(/clip=/.test(location.hash) ? "play" : "map");
+/* Start sequence: the logo draws, the status lines appear, then the two halves open on the map. */
+if (!reduced && !/clip=|noboot/.test(location.hash)) (function () {
+  const b = $("boot"), lines = ["CAM-01    ONLINE", "RF-01     ONLINE", "MIC-01    ONLINE"], total = DATA.clips.length; b.hidden = false;
+  b.querySelector("u i").animate([{ width: "0%" }, { width: "100%" }], { duration: 4300, delay: 700, easing: "linear", fill: "both" });
+  lines.forEach((l, i) => setTimeout(() => { $("bootlines").textContent += (i ? "\n" : "") + l; }, 1300 + i * 950));
+  /* The count of recordings starts at 1 and goes up to the full count, one at a time. */
+  for (let n = 1; n <= total; n++) setTimeout(() => { $("bootlines").textContent = lines.join("\n") + `\nRECORDINGS  ${n} LOADED`; }, 4150 + (n - 1) * 190);
+  setTimeout(() => {
+    b.querySelector(".bc").animate([{ opacity: 1, transform: "translate(-50%, -50%)" }, { opacity: 0, transform: "translate(-50%, -50%) scale(1.25)" }], { duration: 300, fill: "forwards" });
+    const o = { duration: 760, easing: "cubic-bezier(.7,0,.2,1)", fill: "forwards", delay: 140 };
+    b.querySelector(".t").animate([{ transform: "none" }, { transform: "translateY(-101%)" }], o);
+    b.querySelector(".b").animate([{ transform: "none" }, { transform: "translateY(101%)" }], o).finished.then(() => { b.hidden = true; });
+    if (view === "map") setTimeout(() => { reveal("map"); mapSet(...mapHome(.8)); mapTo(...mapHome(), 1600); }, 220);
+  }, 5300);
+})();
+</script>
+</body>
+</html>
