@@ -399,11 +399,12 @@ kbd { background: transparent; border-color: var(--dim); color: var(--soft); }
 
 /* Recordings page */
 #recp { left: 64px; top: 60px; width: 1844px; height: 978px; }
-#rechead, .rec { display: grid; grid-template-columns: 176px 150px 1fr 300px 170px 150px 150px; align-items: center; gap: 0 20px; padding: 0 20px; }
+#rechead, .rec { display: grid; grid-template-columns: 176px 140px 1fr 190px 240px 130px 130px 150px; align-items: center; gap: 0 20px; padding: 0 20px; }
 #rechead { height: 40px; border-bottom: 1px solid var(--line); font: 600 14px var(--display); letter-spacing: .12em; text-transform: uppercase; color: var(--dim); }
 .rec { width: 100%; height: 122px; background: none; border: 0; border-bottom: 1px solid var(--line); text-align: left; cursor: pointer; font-size: 18px; transition: background-color .18s ease; }
 .rec:hover, .rec.sel { background: var(--raised); } .rec.sel { box-shadow: inset 4px 0 0 var(--blue) !important; }
 .rec img { width: 176px; height: 98px; object-fit: cover; display: block; background: var(--well); }
+.rec .gt { justify-self: start; font: 600 15px var(--mono); text-transform: uppercase; padding: 4px 10px; border: 1px solid var(--line); color: var(--soft); white-space: nowrap; } .rec .gt.yes { color: var(--alert); border-color: var(--alert); }
 .rec b { font: 600 18px var(--mono); } .rec .mono { font: 400 16px var(--mono); color: var(--soft); }
 .rec .s { display: flex; gap: 6px; } .rec .s i { font: 500 13px var(--mono); font-style: normal; border: 1px solid var(--line); padding: 3px 9px; } .rec .s i.na { color: var(--dim); text-decoration: line-through; }
 .rec .open { justify-self: end; background: var(--blue); color: #fff; font: 600 15px var(--ui); padding: 8px 22px; opacity: 0; transition: opacity .18s ease; } .rec:hover .open, .rec.sel .open { opacity: 1 !important; }
@@ -568,7 +569,7 @@ kbd { background: transparent; border-color: var(--dim); color: var(--soft); }
     </div>
   </div>
   <div class="page" id="v-recs">
-    <div class="panel" id="recp"><div class="phead"><span class="cap">Recordings</span><span class="r"><span class="meta" id="recmeta"></span></span></div><div id="rechead"><span></span><span>ID</span><span>Source</span><span>Sensors</span><span>Length</span><span>Decisions</span><span></span></div><div id="reclist"></div></div>
+    <div class="panel" id="recp"><div class="phead"><span class="cap">Recordings</span><span class="r"><span class="meta" id="recmeta"></span></span></div><div id="rechead"><span></span><span>ID</span><span>Source</span><span>Ground truth</span><span>Sensors</span><span>Length</span><span>Decisions</span><span></span></div><div id="reclist"></div></div>
   </div>
   <div class="page" id="v-play">
   <button class="panel feed" id="f-cam" type="button"><span class="phead"><span class="cap">Camera</span><span class="meta">CAM-01</span><span class="r"><span class="pill"></span><kbd>1</kbd></span></span><span class="view"><video id="video" muted playsinline preload="auto"></video><i class="scanl" id="scanl"></i><img id="still" alt="" hidden><i class="noise"></i><span class="osd tl" id="osd-src"></span><span class="osd bl" id="osd-t"></span><span class="osd tr">ALARM</span><span class="lost">NO SIGNAL<small>Example cause: weather</small></span></span></button>
@@ -997,7 +998,7 @@ async function closeModel() {
 /* Pages. The map is the start page. The recordings page lists the saved recordings. A recording opens on the playback page. */
 let view = "map", sel = 0;
 $("nrec").textContent = DATA.clips.length; $("recmeta").textContent = `${DATA.clips.length} saved`;
-$("reclist").innerHTML = DATA.clips.map((c, i) => `<button class="rec" type="button"><span class="rthumb"><img src="${c.poster}" alt=""></span><b>REC-00${i + 1}</b><span>${c.place}</span><span class="s">${["CAM", "RF", "AUD"].map((n, k) => `<i class="${c.available[k] === "1" ? "" : "na"}">${n}</i>`).join("")}</span><span class="mono">${c.kind === "snapshot" ? "1 sample" : c.duration.toFixed(2) + " s"}</span><span class="mono">${c.windows.length}</span><span class="open">Open</span></button>`).join("");
+$("reclist").innerHTML = DATA.clips.map((c, i) => `<button class="rec" type="button"><span class="rthumb"><img src="${c.poster}" alt=""></span><b>REC-00${i + 1}</b><span>${c.place}</span><span class="gt${c.label ? " yes" : ""}">${c.label ? "Drone" : c.id.includes("bird") ? "No drone (bird)" : "No drone"}</span><span class="s">${["CAM", "RF", "AUD"].map((n, k) => `<i class="${c.available[k] === "1" ? "" : "na"}">${n}</i>`).join("")}</span><span class="mono">${c.kind === "snapshot" ? "1 sample" : c.duration.toFixed(2) + " s"}</span><span class="mono">${c.windows.length}</span><span class="open">Open</span></button>`).join("");
 const RECS = [...$("reclist").children];
 function setCrumb() { $("crumb").innerHTML = view === "map" ? "Map / <b>NTU campus</b>" : view === "recs" ? "<b>Recordings</b>" : `Recordings / <b>REC-00${ci + 1}, ${clip.place}</b>`; }
 const KEYS = {
